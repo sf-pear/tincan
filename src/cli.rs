@@ -3,31 +3,13 @@ use std::path::PathBuf;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
-    Init {
-        repo: PathBuf,
-    },
-    Inspect {
-        repo: PathBuf,
-    },
+    Init { repo: PathBuf },
+    Inspect { repo: PathBuf },
     Record(RecordArgs),
-    Capture(CaptureArgs),
-    Handoff(HandoffArgs),
-    FieldNote {
-        repo: PathBuf,
-        source_id: String,
-        title: Option<String>,
-    },
-    Search {
-        repo: PathBuf,
-        query: String,
-    },
-    CheckChanged {
-        repo: PathBuf,
-    },
-    SkillInstall {
-        path: Option<PathBuf>,
-        force: bool,
-    },
+    Search { repo: PathBuf, query: String },
+    Show { repo: PathBuf, id: String },
+    CheckChanged { repo: PathBuf },
+    SkillInstall { path: Option<PathBuf>, force: bool },
 }
 
 #[derive(Debug, PartialEq)]
@@ -35,26 +17,12 @@ pub struct RecordArgs {
     pub kind: String,
     pub repo: PathBuf,
     pub title: String,
-    pub summary: String,
-    pub result: Option<String>,
-    pub status: Option<String>,
-    pub affects: Vec<String>,
+    pub note: String,
+    pub files: Vec<String>,
     pub topics: Vec<String>,
     pub evidence: Vec<String>,
     pub related: Vec<String>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct CaptureArgs {
-    pub repo: PathBuf,
-    pub title: Option<String>,
-}
-
-#[derive(Debug, PartialEq)]
-pub struct HandoffArgs {
-    pub repo: PathBuf,
-    pub title: Option<String>,
-    pub next: Vec<String>,
+    pub supersedes: Vec<String>,
 }
 
 pub fn parse(args: Vec<String>) -> Result<Command, String> {
@@ -71,29 +39,6 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
             repo: positional_repo(&args[1..])?,
         }),
         "record" => parse_record(&args[1..]),
-        "capture" => {
-            let values = Flags::parse(&args[1..])?;
-            Ok(Command::Capture(CaptureArgs {
-                repo: values.repo()?,
-                title: values.one("title"),
-            }))
-        }
-        "handoff" => {
-            let values = Flags::parse(&args[1..])?;
-            Ok(Command::Handoff(HandoffArgs {
-                repo: values.repo()?,
-                title: values.one("title"),
-                next: values.many("next"),
-            }))
-        }
-        "field-note" => {
-            let values = Flags::parse(&args[1..])?;
-            Ok(Command::FieldNote {
-                repo: values.repo()?,
-                source_id: values.required("from")?,
-                title: values.one("title"),
-            })
-        }
         "search" => {
             let values = Flags::parse(&args[1..])?;
             let query = values
@@ -104,6 +49,18 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
             Ok(Command::Search {
                 repo: values.repo()?,
                 query,
+            })
+        }
+        "show" => {
+            let values = Flags::parse(&args[1..])?;
+            let id = values
+                .positionals
+                .first()
+                .cloned()
+                .ok_or_else(|| "show requires a record ID".to_string())?;
+            Ok(Command::Show {
+                repo: values.repo()?,
+                id,
             })
         }
         "check" => {
@@ -138,24 +95,39 @@ fn parse_record(args: &[String]) -> Result<Command, String> {
     let kind = args
         .first()
         .cloned()
-        .ok_or_else(|| "record requires attempt, decision, or learning".to_string())?;
-    if !matches!(kind.as_str(), "attempt" | "decision" | "learning") {
-        return Err("record kind must be attempt, decision, or learning".to_string());
+        .ok_or_else(|| "record requires decision or learning".to_string())?;
+    if !matches!(kind.as_str(), "decision" | "learning") {
+        return Err("record kind must be decision or learning".to_string());
     }
     let values = Flags::parse(&args[1..])?;
+    values.ensure_only(&[
+        "repo",
+        "title",
+        "note",
+        "file",
+        "topic",
+        "evidence",
+        "related",
+        "supersedes",
+    ])?;
+    values.ensure_at_most_one(&["repo", "title", "note"])?;
     let title = values.required("title")?;
-    let summary = values.required("summary")?;
+    let note = values.required("note")?;
+    if kind != "decision" && values.present("supersedes") {
+        return Err(format!(
+            "remove --supersedes: it is only valid for decisions, not {kind} records"
+        ));
+    }
     Ok(Command::Record(RecordArgs {
         kind,
         repo: values.repo()?,
         title,
-        summary,
-        result: values.one("result"),
-        status: values.one("status"),
-        affects: values.many("affects"),
+        note,
+        files: values.many("file"),
         topics: values.many("topic"),
         evidence: values.many("evidence"),
         related: values.many("related"),
+        supersedes: values.many("supersedes"),
     }))
 }
 
@@ -230,6 +202,30 @@ impl Flags {
         self.values.iter().any(|(key, _)| key == name)
     }
 
+    fn ensure_only(&self, allowed: &[&str]) -> Result<(), String> {
+        if let Some((name, _)) = self
+            .values
+            .iter()
+            .find(|(name, _)| !allowed.contains(&name.as_str()))
+        {
+            return Err(format!(
+                "unknown option --{name}; run `tincan --help` and retry with a listed option"
+            ));
+        }
+        Ok(())
+    }
+
+    fn ensure_at_most_one(&self, names: &[&str]) -> Result<(), String> {
+        for name in names {
+            if self.values.iter().filter(|(key, _)| key == name).count() > 1 {
+                return Err(format!(
+                    "--{name} may only be provided once; keep the intended value and retry"
+                ));
+            }
+        }
+        Ok(())
+    }
+
     fn repo(&self) -> Result<PathBuf, String> {
         self.one("repo")
             .map(PathBuf::from)
@@ -244,24 +240,21 @@ pub fn help() -> &'static str {
 USAGE
   tincan init [REPOSITORY]
   tincan inspect [REPOSITORY]
-  tincan record <attempt|decision|learning> --title TEXT --summary TEXT [OPTIONS]
-  tincan capture [--repo PATH] [--title TEXT]
-  tincan handoff [--repo PATH] [--title TEXT] [--next TEXT ...]
-  tincan field-note [--repo PATH] --from RECORD_ID [--title TEXT]
+  tincan record <decision|learning> --title TEXT --note TEXT [OPTIONS]
   tincan search [--repo PATH] QUERY
+  tincan show [--repo PATH] RECORD_ID
   tincan check [--repo PATH] --changed
   tincan skill install [--path SKILLS_DIRECTORY] [--force]
 
 RECORD OPTIONS
   --repo PATH
   --title TEXT
-  --summary TEXT
-  --result TEXT
-  --status TEXT
-  --affects PATH_OR_MODULE       repeatable
+  --note TEXT
+  --file REPOSITORY_PATH         repeatable
   --topic TEXT                   repeatable
   --evidence TEXT                repeatable
   --related ID                   repeatable
+  --supersedes DECISION_ID       repeatable; decisions only
 "#
 }
 
@@ -274,15 +267,15 @@ mod tests {
         let command = parse(
             [
                 "record",
-                "attempt",
+                "learning",
                 "--title",
                 "Paging",
-                "--summary",
-                "Try pages",
-                "--affects",
+                "--note",
+                "Try pages because startup is slow.",
+                "--file",
                 "src/a.rs",
-                "--affects",
-                "gallery",
+                "--file",
+                "src/b.rs",
             ]
             .map(str::to_string)
             .to_vec(),
@@ -292,7 +285,47 @@ mod tests {
         let Command::Record(record) = command else {
             panic!("expected record command");
         };
-        assert_eq!(record.affects, vec!["src/a.rs", "gallery"]);
+        assert_eq!(record.files, vec!["src/a.rs", "src/b.rs"]);
+    }
+
+    #[test]
+    fn gives_actionable_record_validation_errors() {
+        let learning_status = parse(
+            [
+                "record",
+                "learning",
+                "--title",
+                "Paging",
+                "--note",
+                "Measure first",
+                "--status",
+                "accepted",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+        )
+        .unwrap_err();
+        assert_eq!(
+            learning_status,
+            "unknown option --status; run `tincan --help` and retry with a listed option"
+        );
+
+        let typo = parse(
+            [
+                "record",
+                "learning",
+                "--title",
+                "Paging",
+                "--note",
+                "Measure first",
+                "--files",
+                "src/a.rs",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+        )
+        .unwrap_err();
+        assert!(typo.contains("unknown option --files"));
     }
 
     #[test]

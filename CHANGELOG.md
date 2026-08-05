@@ -9,13 +9,13 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 ### Added
 
 - Initialize portable `.tincan/` ledgers in any Git repository.
-- Record attempts, decisions, and learnings as Markdown.
-- Capture deterministic session drafts from Git state.
-- Create transcript-independent handoff drafts.
-- Draft field notes from accepted Tincan records.
+- Record decisions and learnings as Markdown notes.
+- Enforce managed decision statuses while keeping learnings status-free.
+- Supersede decisions without erasing their original reasoning.
+- Scan compact record frontmatter before loading relevant full Markdown with
+  `tincan show`.
 - Search all Tincan records without a database.
 - Match changed files against related historical records.
-- Run from Zed through project-aware tasks.
 - Create an agent workflow guide and link it from root `AGENTS.md` during
   `tincan init`.
 - Bundle a portable Tincan agent skill and install it into Codex or a selected

@@ -6,10 +6,7 @@ use std::process::Command;
 pub struct Snapshot {
     pub root: PathBuf,
     pub branch: String,
-    pub status: String,
     pub changed_files: Vec<String>,
-    pub recent_commits: String,
-    pub diff_stat: String,
 }
 
 pub fn repository_root(path: &Path) -> Result<PathBuf, String> {
@@ -27,16 +24,7 @@ pub fn snapshot(path: &Path) -> Result<Snapshot, String> {
         branch: run(&root, &["branch", "--show-current"])?
             .trim()
             .to_string(),
-        status: run(&root, &["status", "--short"])?,
         changed_files: changed_files(&root)?,
-        recent_commits: run(
-            &root,
-            &["log", "-10", "--pretty=format:%h%x09%s", "--no-decorate"],
-        )
-        .unwrap_or_else(|_| "No commits yet".to_string()),
-        diff_stat: run(&root, &["diff", "--stat", "HEAD"])
-            .or_else(|_| run(&root, &["diff", "--stat"]))
-            .unwrap_or_default(),
         root,
     })
 }

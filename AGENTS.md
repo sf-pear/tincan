@@ -7,7 +7,7 @@ repository's `.tincan/` directory.
 
 - Markdown is canonical; indexes and richer analysis must be rebuildable.
 - Raw transcripts are evidence, not accepted project truth.
-- Attempts, failures, decisions, and superseded conclusions remain distinct.
+- Decisions, learnings, and superseded conclusions remain distinct.
 - Keep integrations replaceable.
 - Prefer deterministic path and topic matching before semantic infrastructure.
 - Never change a target repository outside `.tincan/` unless a future command
@@ -33,4 +33,3 @@ cargo run -- --help
 
 Do not add a database, background service, model SDK, graph engine, or
 transcript-specific parser without evidence from real Tincan usage.
-

@@ -1,6 +1,6 @@
-use crate::cli::{self, CaptureArgs, Command, HandoffArgs, RecordArgs};
+use crate::cli::{self, Command, RecordArgs};
 use crate::git;
-use crate::model::{self, Kind, Record};
+use crate::model::{DecisionStatus, Kind, Record};
 use crate::skill::{self, InstallOutcome};
 use crate::store;
 use crate::util::{display_path, slug, unix_timestamp};
@@ -15,14 +15,8 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Init { repo } => init(repo),
         Command::Inspect { repo } => inspect(repo),
         Command::Record(args) => record(args),
-        Command::Capture(args) => capture(args),
-        Command::Handoff(args) => handoff(args),
-        Command::FieldNote {
-            repo,
-            source_id,
-            title,
-        } => field_note(repo, &source_id, title),
         Command::Search { repo, query } => search(repo, &query),
+        Command::Show { repo, id } => show(repo, &id),
         Command::CheckChanged { repo } => check_changed(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
     }
@@ -81,28 +75,31 @@ fn inspect(path: std::path::PathBuf) -> Result<(), String> {
 }
 
 fn record(args: RecordArgs) -> Result<(), String> {
+    if args.kind != "decision" && !args.supersedes.is_empty() {
+        return Err("--supersedes can only be used with a decision".to_string());
+    }
     let snapshot = git::snapshot(&args.repo)?;
     store::require(&snapshot.root)?;
     let timestamp = unix_timestamp()?;
     let kind = Kind::parse(&args.kind)?;
     let id = format!("{}-{timestamp}-{}", kind.as_str(), slug(&args.title));
-    let default_status = match kind {
-        Kind::Attempt => "proposed",
-        Kind::Decision | Kind::Learning => "accepted",
-        _ => "draft",
+    let status = match kind {
+        Kind::Decision => Some(DecisionStatus::Active),
+        Kind::Learning => None,
     };
+    let superseded = store::active_decisions(&snapshot.root, &args.supersedes)?;
     let record = Record {
         id,
         kind,
         timestamp,
         title: args.title.clone(),
-        status: args.status.unwrap_or_else(|| default_status.to_string()),
-        summary: args.summary,
-        result: args.result,
-        affects: args.affects,
+        status,
+        note: args.note,
+        files: args.files,
         topics: args.topics,
         evidence: args.evidence,
         related: args.related,
+        supersedes: args.supersedes,
         branch: snapshot.branch,
     };
     let path = store::write(
@@ -112,60 +109,11 @@ fn record(args: RecordArgs) -> Result<(), String> {
         &args.title,
         &record.render(),
     )?;
+    store::mark_superseded(&superseded, &record.id)?;
     println!("Recorded {}: {}", kind.as_str(), display_path(&path));
-    Ok(())
-}
-
-fn capture(args: CaptureArgs) -> Result<(), String> {
-    let snapshot = git::snapshot(&args.repo)?;
-    store::require(&snapshot.root)?;
-    let timestamp = unix_timestamp()?;
-    let title = args.title.unwrap_or_else(|| {
-        if snapshot.branch.is_empty() {
-            "Development session".to_string()
-        } else {
-            format!("{} development session", snapshot.branch)
-        }
-    });
-    let id = format!("session-{timestamp}-{}", slug(&title));
-    let content = model::render_session(&id, timestamp, &title, &snapshot);
-    let path = store::write(&snapshot.root, Kind::Session, timestamp, &title, &content)?;
-    println!("Captured session draft: {}", display_path(&path));
-    println!("Review its outcomes, decisions, verification, and learning candidates.");
-    Ok(())
-}
-
-fn handoff(args: HandoffArgs) -> Result<(), String> {
-    let snapshot = git::snapshot(&args.repo)?;
-    store::require(&snapshot.root)?;
-    let timestamp = unix_timestamp()?;
-    let title = args
-        .title
-        .unwrap_or_else(|| "Development handoff".to_string());
-    let id = format!("handoff-{timestamp}-{}", slug(&title));
-    let content = model::render_handoff(&id, timestamp, &title, &snapshot, &args.next);
-    let path = store::write(&snapshot.root, Kind::Handoff, timestamp, &title, &content)?;
-    println!("Created handoff: {}", display_path(&path));
-    Ok(())
-}
-
-fn field_note(
-    path: std::path::PathBuf,
-    source_id: &str,
-    title: Option<String>,
-) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
-    let source = store::scan(&root)?
-        .into_iter()
-        .find(|document| document.id == source_id)
-        .ok_or_else(|| format!("no Tincan record found with id {source_id}"))?;
-    let timestamp = unix_timestamp()?;
-    let title = title.unwrap_or_else(|| source.title.clone());
-    let id = format!("field-note-{timestamp}-{}", slug(&title));
-    let content = model::render_field_note(&id, timestamp, &title, source_id, &source.title);
-    let output = store::write(&root, Kind::FieldNote, timestamp, &title, &content)?;
-    println!("Created field-note draft: {}", display_path(&output));
-    println!("Rewrite it as a narrative and review private details before publishing.");
+    if !superseded.is_empty() {
+        println!("Superseded {} earlier decision(s).", superseded.len());
+    }
     Ok(())
 }
 
@@ -174,29 +122,67 @@ fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
     let query = query.to_lowercase();
     let matches: Vec<_> = store::scan(&root)?
         .into_iter()
-        .filter(|document| document.text.to_lowercase().contains(&query))
+        .filter(|document| metadata_text(document).to_lowercase().contains(&query))
         .collect();
     if matches.is_empty() {
         println!("No Tincan records matched.");
         return Ok(());
     }
     for document in matches {
-        let topics = if document.topics.is_empty() {
-            String::new()
-        } else {
-            format!("\n  topics: {}", document.topics.join(", "))
-        };
-        println!(
-            "{} [{} / {}]\n  id: {}{}\n  {}",
-            document.title,
-            document.kind,
-            document.status,
-            document.id,
-            topics,
-            display_path(&document.path)
-        );
+        print_document_summary(&document);
     }
     Ok(())
+}
+
+fn show(path: std::path::PathBuf, id: &str) -> Result<(), String> {
+    let root = git::repository_root(&path)?;
+    let document = store::scan(&root)?
+        .into_iter()
+        .find(|document| document.id == id)
+        .ok_or_else(|| format!("no Tincan record found with id {id}"))?;
+    print!("{}", store::read_document(&document)?);
+    Ok(())
+}
+
+fn metadata_text(document: &store::Document) -> String {
+    [
+        vec![
+            document.id.clone(),
+            document.title.clone(),
+            document.kind.clone(),
+            document.status.clone().unwrap_or_default(),
+        ],
+        document.files.clone(),
+        document.topics.clone(),
+        document.related.clone(),
+        document.supersedes.clone(),
+        document.superseded_by.clone(),
+    ]
+    .concat()
+    .join("\n")
+}
+
+fn print_document_summary(document: &store::Document) {
+    let label = document
+        .status
+        .as_deref()
+        .map(|status| format!("{} / {status}", document.kind))
+        .unwrap_or_else(|| document.kind.clone());
+    println!("{} [{label}]", document.title);
+    println!("  id: {}", document.id);
+    if !document.files.is_empty() {
+        println!("  files: {}", document.files.join(", "));
+    }
+    if !document.topics.is_empty() {
+        println!("  topics: {}", document.topics.join(", "));
+    }
+    if !document.supersedes.is_empty() {
+        println!("  supersedes: {}", document.supersedes.join(", "));
+    }
+    if !document.superseded_by.is_empty() {
+        println!("  superseded by: {}", document.superseded_by.join(", "));
+    }
+    println!("  {}", display_path(&document.path));
 }
 
 fn check_changed(path: std::path::PathBuf) -> Result<(), String> {
@@ -215,7 +201,7 @@ fn check_changed(path: std::path::PathBuf) -> Result<(), String> {
     let mut related = Vec::new();
     for document in store::scan(&root)? {
         let matched: Vec<_> = document
-            .affects
+            .files
             .iter()
             .filter(|affected| {
                 changed
@@ -236,11 +222,15 @@ fn check_changed(path: std::path::PathBuf) -> Result<(), String> {
 
     println!("\nRelated Tincan history:");
     for (document, matched) in related {
+        let label = document
+            .status
+            .as_deref()
+            .map(|status| format!("{} / {status}", document.kind))
+            .unwrap_or_else(|| document.kind.clone());
         println!(
-            "  {} [{} / {}]\n    matched: {}\n    {}",
+            "  {} [{}]\n    matched: {}\n    {}",
             document.title,
-            document.kind,
-            document.status,
+            label,
             matched.join(", "),
             display_path(&document.path)
         );
