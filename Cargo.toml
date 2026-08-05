@@ -1,0 +1,12 @@
+[package]
+name = "tincan-cli"
+version = "0.1.0"
+edition = "2024"
+description = "Capture important decisions, their reasoning, and learnings from agent coding sessions in plain Markdown"
+license = "MIT"
+
+[dependencies]
+
+[[bin]]
+name = "tincan"
+path = "src/main.rs"

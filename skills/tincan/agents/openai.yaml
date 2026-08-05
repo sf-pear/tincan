@@ -1,0 +1,4 @@
+interface:
+  display_name: "Tincan"
+  short_description: "Capture development decisions and learnings"
+  default_prompt: "Use $tincan to preserve important decisions, attempts, learnings, and handoff context while working in this repository."
