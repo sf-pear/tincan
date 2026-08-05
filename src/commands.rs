@@ -1,9 +1,10 @@
-use crate::cli::{self, Command, RecordArgs};
+use crate::cli::{self, Command, JournalArgs, RecordArgs};
 use crate::git;
 use crate::model::{DecisionStatus, Kind, Record};
 use crate::skill::{self, InstallOutcome};
 use crate::store;
 use crate::util::{display_path, slug, unix_timestamp};
+use chrono::{Local, SecondsFormat};
 use std::collections::BTreeMap;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
@@ -15,6 +16,8 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Init { repo } => init(repo),
         Command::Inspect { repo } => inspect(repo),
         Command::Record(args) => record(args),
+        Command::Journal(args) => journal(args),
+        Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
         Command::CheckChanged { repo } => check_changed(repo),
@@ -37,15 +40,15 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
 
 fn init(path: std::path::PathBuf) -> Result<(), String> {
     let root = git::repository_root(&path)?;
+    let exclude = git::exclude_path(&root)?;
+    let excluded = store::ensure_git_excluded(&exclude)?;
     let tincan = store::initialize(&root)?;
     println!("Initialized Tincan at {}", display_path(&tincan));
-    let (agents, added) = store::install_agent_guidance(&root)?;
-    let action = if added {
-        "Added Tincan guidance to"
+    if excluded {
+        println!("Kept .tincan private through Git's local exclude file.");
     } else {
-        "Tincan guidance already present in"
-    };
-    println!("{action} {}", display_path(&agents));
+        println!(".tincan is already excluded from Git locally.");
+    }
     Ok(())
 }
 
@@ -86,6 +89,7 @@ fn record(args: RecordArgs) -> Result<(), String> {
     let status = match kind {
         Kind::Decision => Some(DecisionStatus::Active),
         Kind::Learning => None,
+        Kind::Journal => unreachable!("journal entries use the journal command"),
     };
     let superseded = store::active_decisions(&snapshot.root, &args.supersedes)?;
     let record = Record {
@@ -114,6 +118,41 @@ fn record(args: RecordArgs) -> Result<(), String> {
     if !superseded.is_empty() {
         println!("Superseded {} earlier decision(s).", superseded.len());
     }
+    Ok(())
+}
+
+fn journal(args: JournalArgs) -> Result<(), String> {
+    let root = git::repository_root(&args.repo)?;
+    store::require(&root)?;
+    let now = Local::now();
+    let date = now.format("%Y-%m-%d").to_string();
+    let created_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
+    let update = store::update_journal(
+        &root,
+        &date,
+        &created_at,
+        &args.done,
+        &args.questions,
+        &args.next,
+    )?;
+    println!("Updated journal: {}", display_path(&update.path));
+    if update.added == 0 {
+        println!("No new bullets; exact duplicates were already present.");
+    } else {
+        println!("Added {} bullet(s).", update.added);
+    }
+    Ok(())
+}
+
+fn resume(path: std::path::PathBuf) -> Result<(), String> {
+    let root = git::repository_root(&path)?;
+    let Some((journal_path, content)) = store::latest_journal(&root)? else {
+        println!("No journal entries yet.");
+        println!("Use `tincan journal --done <text>` as meaningful work develops.");
+        return Ok(());
+    };
+    println!("Latest journal: {}\n", display_path(&journal_path));
+    print!("{content}");
     Ok(())
 }
 

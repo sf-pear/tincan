@@ -1,7 +1,9 @@
 # Tincan User Guide
 
-Tincan preserves two kinds of durable development memory:
+Tincan preserves three complementary kinds of development memory:
 
+- A **journal** records meaningful work completed today, open questions, and
+  concrete next steps.
 - A **decision** records what was chosen and why.
 - A **learning** records what became known and the evidence supporting it.
 
@@ -27,11 +29,43 @@ Initialization creates:
 ├── config.toml
 ├── decisions/
 ├── learnings/
+├── journal/
 └── AGENT_GUIDE.md
 ```
 
-It also adds one pointer to the root `AGENTS.md`. Existing content is preserved,
-and repeated initialization does not duplicate it.
+Tincan adds `.tincan/` to `.git/info/exclude`, which is local to the checkout.
+The memory remains available to local agents without appearing in `git status`
+or being pushed. Initialization does not modify tracked `AGENTS.md` or
+`.gitignore` files and is safe to repeat.
+
+## Keep a daily journal
+
+The journal is one living Markdown file per local calendar day:
+
+```text
+.tincan/journal/2026-08-05.md
+```
+
+Add concise bullets as meaningful work develops:
+
+```powershell
+tincan journal `
+  --done "Implemented the compact gallery read model" `
+  --question "Should adjacent details be preloaded?" `
+  --next "Add the stale-response regression test"
+```
+
+Each option is repeatable, and at least one is required. Exact duplicates are
+ignored. When a `--done` bullet exactly matches an existing `Next` bullet,
+Tincan moves it to `Done`.
+
+Return to the latest journal entry with:
+
+```powershell
+tincan resume
+```
+
+Use the journal for chronological working state, not extensive reasoning.
 
 ## Record a learning
 
@@ -105,6 +139,19 @@ Tincan validates manually edited frontmatter while scanning. Decisions must be
 
 ## What to preserve
 
+Classify information by the question it answers:
+
+| Type | Question | Examples |
+| --- | --- | --- |
+| Journal | What happened today, what is open, and what comes next? | Implemented feature, unresolved question, unfinished task |
+| Learning | What evidence-supported knowledge will remain useful beyond today? | Measured limitation, failure that revealed a durable constraint |
+| Decision | What accepted choice now constrains future work, and why? | Architecture, convention, replacement of an earlier choice |
+
+Do not turn an open question, todo, progress update, or proposal into a learning
+or decision. A completed change may have one short journal bullet and a durable
+record, but avoid repeating the reasoning: the journal says what progressed;
+the learning or decision explains why it matters.
+
 Prefer a record that explains the reasoning:
 
 > Paging introduced sequential requests without reducing measured renderer
@@ -114,11 +161,12 @@ Prefer a record that explains the reasoning:
 Avoid routine progress updates, conversational speculation, raw transcripts,
 credentials, private customer data, and conclusions unsupported by evidence.
 
-Commit `.tincan/decisions/` and `.tincan/learnings/` when the repository's
-development memory should be shared with collaborators.
+Tincan memory is private by default. A future reviewed export workflow may
+produce a deliberately committable document; do not force-add private `.tincan/`
+files merely to share them casually.
 
 ## Scope
 
-Tincan does not create session summaries, handoffs, field notes, blog posts,
-release notes, commits, PRs, or publications. Separate tools may consume its
-plain Markdown later without expanding Tincan's core responsibility.
+Tincan does not create blog posts, release notes, commits, PRs, or publications.
+Separate tools may consume its plain Markdown later without expanding Tincan's
+core responsibility.

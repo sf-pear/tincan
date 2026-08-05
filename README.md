@@ -1,7 +1,7 @@
 # Tincan
 
-Capture important decisions, the reasoning behind them, and evidence-supported
-learnings in plain Markdown so anyone can pick up where the work left off.
+Journal meaningful development progress, preserve important decisions and
+evidence-supported learnings, and pick up where the work left off.
 
 Tincan is a small, dependency-light Rust CLI. It is not an agent runner,
 transcript database, publishing platform, or semantic search service. Markdown
@@ -29,6 +29,13 @@ Use `--force` to replace an older Tincan-owned skill installation.
 ```powershell
 tincan init C:\path\to\project
 tincan inspect C:\path\to\project
+
+tincan journal --repo C:\path\to\project `
+  --done "Implemented the compact gallery read model" `
+  --question "Should adjacent details be preloaded?" `
+  --next "Add the stale-response regression test"
+
+tincan resume --repo C:\path\to\project
 
 tincan record learning --repo C:\path\to\project `
   --title "Paging does not fix main-thread saturation" `
@@ -63,13 +70,15 @@ tincan record decision `
 .tincan/
 ├── config.toml
 ├── decisions/
-└── learnings/
+├── learnings/
+├── journal/
+└── AGENT_GUIDE.md
 ```
 
-Initialization also creates `.tincan/AGENT_GUIDE.md` and adds one pointer to it
-in the root `AGENTS.md`. Existing instructions are preserved and initialization
-is idempotent.
+Initialization adds `.tincan/` to Git's local exclude file. Tincan memory stays
+inside the checkout but does not appear in `git status` or get pushed. It does
+not modify the repository's tracked `AGENTS.md` or `.gitignore`.
 
 Tincan reads record frontmatter for search and changed-file matching, then loads
-the full Markdown only for `show`. Apart from the documented agent-guide pointer
-and explicit skill installation, it never writes outside `.tincan/`.
+the full Markdown only for `show`. Explicit skill installation is the only
+operation that writes outside the repository and its local Git metadata.

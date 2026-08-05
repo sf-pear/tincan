@@ -6,10 +6,20 @@ pub enum Command {
     Init { repo: PathBuf },
     Inspect { repo: PathBuf },
     Record(RecordArgs),
+    Journal(JournalArgs),
+    Resume { repo: PathBuf },
     Search { repo: PathBuf, query: String },
     Show { repo: PathBuf, id: String },
     CheckChanged { repo: PathBuf },
     SkillInstall { path: Option<PathBuf>, force: bool },
+}
+
+#[derive(Debug, PartialEq)]
+pub struct JournalArgs {
+    pub repo: PathBuf,
+    pub done: Vec<String>,
+    pub questions: Vec<String>,
+    pub next: Vec<String>,
 }
 
 #[derive(Debug, PartialEq)]
@@ -39,6 +49,18 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
             repo: positional_repo(&args[1..])?,
         }),
         "record" => parse_record(&args[1..]),
+        "journal" => parse_journal(&args[1..]),
+        "resume" => {
+            let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["repo"])?;
+            values.ensure_at_most_one(&["repo"])?;
+            if !values.positionals.is_empty() {
+                return Err("resume does not accept positional arguments".to_string());
+            }
+            Ok(Command::Resume {
+                repo: values.repo()?,
+            })
+        }
         "search" => {
             let values = Flags::parse(&args[1..])?;
             let query = values
@@ -75,6 +97,29 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "skill" => parse_skill(&args[1..]),
         other => Err(format!("unknown command: {other}\n\n{}", help())),
     }
+}
+
+fn parse_journal(args: &[String]) -> Result<Command, String> {
+    let values = Flags::parse(args)?;
+    values.ensure_only(&["repo", "done", "question", "next"])?;
+    values.ensure_at_most_one(&["repo"])?;
+    if !values.positionals.is_empty() {
+        return Err("journal does not accept positional arguments".to_string());
+    }
+    let done = values.many("done");
+    let questions = values.many("question");
+    let next = values.many("next");
+    if done.is_empty() && questions.is_empty() && next.is_empty() {
+        return Err(
+            "journal requires at least one --done, --question, or --next bullet".to_string(),
+        );
+    }
+    Ok(Command::Journal(JournalArgs {
+        repo: values.repo()?,
+        done,
+        questions,
+        next,
+    }))
 }
 
 fn parse_skill(args: &[String]) -> Result<Command, String> {
@@ -241,6 +286,8 @@ USAGE
   tincan init [REPOSITORY]
   tincan inspect [REPOSITORY]
   tincan record <decision|learning> --title TEXT --note TEXT [OPTIONS]
+  tincan journal [--repo PATH] [--done TEXT ...] [--question TEXT ...] [--next TEXT ...]
+  tincan resume [--repo PATH]
   tincan search [--repo PATH] QUERY
   tincan show [--repo PATH] RECORD_ID
   tincan check [--repo PATH] --changed
@@ -344,5 +391,30 @@ mod tests {
                 force: true,
             }
         );
+    }
+
+    #[test]
+    fn parses_daily_journal_bullets() {
+        let command = parse(
+            [
+                "journal",
+                "--done",
+                "Implemented search",
+                "--question",
+                "Should topics be normalized?",
+                "--next",
+                "Test on another repository",
+            ]
+            .map(str::to_string)
+            .to_vec(),
+        )
+        .unwrap();
+
+        let Command::Journal(journal) = command else {
+            panic!("expected journal command");
+        };
+        assert_eq!(journal.done, vec!["Implemented search"]);
+        assert_eq!(journal.questions, vec!["Should topics be normalized?"]);
+        assert_eq!(journal.next, vec!["Test on another repository"]);
     }
 }

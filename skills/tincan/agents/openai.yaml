@@ -1,4 +1,4 @@
 interface:
   display_name: "Tincan"
-  short_description: "Preserve development decisions and learnings"
-  default_prompt: "Use $tincan to preserve accepted development decisions and evidence-supported learnings while working in this repository."
+  short_description: "Journal work and preserve durable reasoning"
+  default_prompt: "Use $tincan to resume and journal meaningful development work, preserve accepted decisions, and record evidence-supported learnings in this checkout."

@@ -4,6 +4,7 @@ use crate::util::yaml_string;
 pub enum Kind {
     Decision,
     Learning,
+    Journal,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -38,6 +39,7 @@ impl Kind {
         match value {
             "decision" => Ok(Self::Decision),
             "learning" => Ok(Self::Learning),
+            "journal" => Ok(Self::Journal),
             _ => Err(format!("unsupported record kind: {value}")),
         }
     }
@@ -46,6 +48,7 @@ impl Kind {
         match self {
             Self::Decision => "decision",
             Self::Learning => "learning",
+            Self::Journal => "journal",
         }
     }
 
@@ -53,6 +56,7 @@ impl Kind {
         match self {
             Self::Decision => "decisions",
             Self::Learning => "learnings",
+            Self::Journal => "journal",
         }
     }
 }

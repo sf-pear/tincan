@@ -18,6 +18,17 @@ pub fn repository_root(path: &Path) -> Result<PathBuf, String> {
     Ok(PathBuf::from(root))
 }
 
+pub fn exclude_path(path: &Path) -> Result<PathBuf, String> {
+    let root = repository_root(path)?;
+    let value = run(&root, &["rev-parse", "--git-path", "info/exclude"])?;
+    let path = PathBuf::from(value.trim());
+    if path.is_absolute() {
+        Ok(path)
+    } else {
+        Ok(root.join(path))
+    }
+}
+
 pub fn snapshot(path: &Path) -> Result<Snapshot, String> {
     let root = repository_root(path)?;
     Ok(Snapshot {

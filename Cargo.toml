@@ -6,6 +6,7 @@ description = "Capture important decisions, their reasoning, and learnings from 
 license = "MIT"
 
 [dependencies]
+chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 
 [[bin]]
 name = "tincan"

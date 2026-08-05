@@ -9,6 +9,10 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 ### Added
 
 - Initialize portable `.tincan/` ledgers in any Git repository.
+- Keep `.tincan/` private by default through Git's local exclude file without
+  modifying tracked project files.
+- Maintain one living daily journal for completed work, open questions, and next
+  steps, and resume from the latest entry.
 - Record decisions and learnings as Markdown notes.
 - Enforce managed decision statuses while keeping learnings status-free.
 - Supersede decisions without erasing their original reasoning.
@@ -16,7 +20,6 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
   `tincan show`.
 - Search all Tincan records without a database.
 - Match changed files against related historical records.
-- Create an agent workflow guide and link it from root `AGENTS.md` during
-  `tincan init`.
+- Create a private agent workflow guide during `tincan init`.
 - Bundle a portable Tincan agent skill and install it into Codex or a selected
   harness skills directory with `tincan skill install`.

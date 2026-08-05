@@ -6,40 +6,40 @@ use std::path::{Path, PathBuf};
 
 const AGENT_GUIDE: &str = r#"# Tincan Agent Guide
 
-Tincan is this repository's development ledger. Records live as Markdown under
-`.tincan/` and preserve evidence that should survive changing agents and tools.
+Tincan is this checkout's private development memory. Markdown under `.tincan/`
+is canonical and locally excluded from Git by default.
 
-## Before changing code
+## Resume work
 
-1. Run `tincan check --changed`.
-2. Run `tincan search "<relevant feature, file, or concept>"`.
-3. Use `tincan show <record-id>` to read only relevant full records.
+1. Run `tincan resume` to read the latest daily journal.
+2. Run `tincan check --changed` when touching existing work.
+3. Search focused terms with `tincan search "<file, feature, or concept>"`.
+4. Use `tincan show <record-id>` only for relevant full records.
 
-## During work
+## Classify information
 
-- Record accepted choices with `tincan record decision`.
+- Add a concise `journal --done` bullet after a meaningful implementation.
+- Add unresolved matters with `journal --question` and concrete unfinished work
+  with `journal --next`. Journal entries answer what happened today or what is
+  currently open; they are not durable conclusions.
+- Record a decision only when a choice is accepted and constrains future work.
 - Use `--supersedes <decision-id>` when a new decision replaces an old one.
 - Do not pass decision status; Tincan manages `active` and `superseded`.
-- Record reusable, evidence-supported findings with `tincan record learning`.
+- Record a learning only when evidence supports knowledge useful beyond today's
+  work. A failed approach is a learning only when it yields a durable conclusion.
 - Do not pass status for learnings; they do not have one.
-- Write the reasoning and outcome together in `--note`.
-- Use repository-relative paths in repeatable `--file` options.
+- Do not turn open questions, todos, progress, or speculation into decisions or
+  learnings. Keep those in the journal.
+- Keep journal bullets brief. Put full reasoning in decisions and learnings
+  rather than duplicating it in the journal.
 - If record validation fails, correct the arguments described by the error and
   retry. Do not bypass validation by writing the record file manually.
-
-## Before finishing
-
-Run the relevant verification commands, then record only durable decisions and
-reusable, evidence-supported learnings created by the work.
 
 Do not store credentials, customer data, or complete raw transcripts in Tincan.
 Raw session text is evidence, not accepted project truth.
 "#;
 
-const AGENTS_INSTRUCTION: &str =
-    "Before starting or finishing development work, read and follow `.tincan/AGENT_GUIDE.md`.";
-
-const DIRECTORIES: [&str; 2] = ["decisions", "learnings"];
+const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
 
 #[derive(Debug)]
 pub struct Document {
@@ -79,32 +79,30 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-pub fn install_agent_guidance(repo: &Path) -> Result<(PathBuf, bool), String> {
-    let path = repo.join("AGENTS.md");
-    let existing = match fs::read_to_string(&path) {
+pub fn ensure_git_excluded(path: &Path) -> Result<bool, String> {
+    let existing = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
     if existing
         .lines()
-        .any(|line| line.trim() == AGENTS_INSTRUCTION)
+        .any(|line| matches!(line.trim(), ".tincan" | ".tincan/" | "/.tincan/"))
     {
-        return Ok((path, false));
+        return Ok(false);
     }
-
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("cannot create {}: {error}", parent.display()))?;
+    }
     let mut updated = existing;
     if !updated.is_empty() && !updated.ends_with('\n') {
         updated.push('\n');
     }
-    if !updated.is_empty() {
-        updated.push('\n');
-    }
-    updated.push_str(AGENTS_INSTRUCTION);
-    updated.push('\n');
-    fs::write(&path, updated)
+    updated.push_str(".tincan/\n");
+    fs::write(path, updated)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
-    Ok((path, true))
+    Ok(true)
 }
 
 pub fn require(repo: &Path) -> Result<PathBuf, String> {
@@ -139,6 +137,139 @@ pub fn write(
     fs::write(&path, content)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(path)
+}
+
+pub struct JournalUpdate {
+    pub path: PathBuf,
+    pub added: usize,
+}
+
+pub fn update_journal(
+    repo: &Path,
+    date: &str,
+    created_at: &str,
+    done: &[String],
+    questions: &[String],
+    next: &[String],
+) -> Result<JournalUpdate, String> {
+    let root = require(repo)?;
+    let path = root.join("journal").join(format!("{date}.md"));
+    let existing = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let original_created_at = scalar(&existing, "created_at").unwrap_or_else(|| created_at.into());
+    let mut done_items = markdown_bullets(&existing, "## Done");
+    let mut question_items = markdown_bullets(&existing, "## Open questions");
+    let mut next_items = markdown_bullets(&existing, "## Next");
+    let mut added = 0;
+
+    for item in clean_bullets(done) {
+        if !done_items.contains(&item) {
+            done_items.push(item.clone());
+            added += 1;
+        }
+        next_items.retain(|next_item| next_item != &item);
+    }
+    for item in clean_bullets(questions) {
+        if !question_items.contains(&item) {
+            question_items.push(item);
+            added += 1;
+        }
+    }
+    for item in clean_bullets(next) {
+        if !done_items.contains(&item) && !next_items.contains(&item) {
+            next_items.push(item);
+            added += 1;
+        }
+    }
+
+    let content = render_journal(
+        date,
+        &original_created_at,
+        &done_items,
+        &question_items,
+        &next_items,
+    );
+    fs::write(&path, content)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    Ok(JournalUpdate { path, added })
+}
+
+pub fn latest_journal(repo: &Path) -> Result<Option<(PathBuf, String)>, String> {
+    let root = require(repo)?;
+    let directory = root.join("journal");
+    let mut paths = fs::read_dir(&directory)
+        .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("md"))
+        .collect::<Vec<_>>();
+    paths.sort();
+    let Some(path) = paths.pop() else {
+        return Ok(None);
+    };
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    Ok(Some((path, content)))
+}
+
+fn clean_bullets(values: &[String]) -> impl Iterator<Item = String> + '_ {
+    values
+        .iter()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+}
+
+fn markdown_bullets(text: &str, heading: &str) -> Vec<String> {
+    let mut in_section = false;
+    let mut values = Vec::new();
+    for line in text.lines() {
+        if line == heading {
+            in_section = true;
+            continue;
+        }
+        if in_section && line.starts_with("## ") {
+            break;
+        }
+        if in_section && let Some(value) = line.strip_prefix("- ") {
+            values.push(value.trim().to_string());
+        }
+    }
+    values
+}
+
+fn render_journal(
+    date: &str,
+    created_at: &str,
+    done: &[String],
+    questions: &[String],
+    next: &[String],
+) -> String {
+    let mut output = format!(
+        "---\nid: {}\ntype: \"journal\"\ncreated_at: {}\ntitle: {}\n---\n\n# {date}\n",
+        crate::util::yaml_string(&format!("journal-{date}")),
+        crate::util::yaml_string(created_at),
+        crate::util::yaml_string(date),
+    );
+    for (heading, values) in [
+        ("Done", done),
+        ("Open questions", questions),
+        ("Next", next),
+    ] {
+        output.push_str(&format!("\n## {heading}\n\n"));
+        if values.is_empty() {
+            output.push_str("<!-- none -->\n");
+        } else {
+            for value in values {
+                output.push_str("- ");
+                output.push_str(value);
+                output.push('\n');
+            }
+        }
+    }
+    output
 }
 
 pub fn scan(repo: &Path) -> Result<Vec<Document>, String> {
@@ -195,6 +326,8 @@ fn validate_record_status(path: &Path, kind: &str, status: Option<&str>) -> Resu
         ("decision", None) => Err("decision status is required".to_string()),
         ("learning", None) => Ok(()),
         ("learning", Some(_)) => Err("learnings must not have a status".to_string()),
+        ("journal", None) => Ok(()),
+        ("journal", Some(_)) => Err("journal entries must not have a status".to_string()),
         _ => Ok(()),
     };
     result.map_err(|error| format!("invalid frontmatter in {}: {error}", path.display()))
@@ -404,22 +537,22 @@ mod tests {
     }
 
     #[test]
-    fn installs_agent_guidance_once_without_replacing_existing_content() {
+    fn excludes_tincan_locally_without_replacing_existing_content() {
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let repo = std::env::temp_dir().join(format!("tincan-agent-guidance-{unique}"));
+        let repo = std::env::temp_dir().join(format!("tincan-git-exclude-{unique}"));
         fs::create_dir_all(&repo).unwrap();
-        let path = repo.join("AGENTS.md");
-        fs::write(&path, "# Existing instructions\n").unwrap();
+        let path = repo.join("exclude");
+        fs::write(&path, "target/\n").unwrap();
 
-        install_agent_guidance(&repo).unwrap();
-        install_agent_guidance(&repo).unwrap();
+        assert!(ensure_git_excluded(&path).unwrap());
+        assert!(!ensure_git_excluded(&path).unwrap());
 
         let content = fs::read_to_string(path).unwrap();
-        assert!(content.starts_with("# Existing instructions\n"));
-        assert_eq!(content.matches(AGENTS_INSTRUCTION).count(), 1);
+        assert!(content.starts_with("target/\n"));
+        assert_eq!(content.matches(".tincan/").count(), 1);
         fs::remove_dir_all(repo).unwrap();
     }
 
@@ -451,5 +584,42 @@ mod tests {
         assert!(updated.contains("status: \"superseded\""));
         assert!(updated.contains("superseded_by:\n  - \"new\""));
         assert!(updated.contains("# Old choice\n\nOriginal reasoning."));
+    }
+
+    #[test]
+    fn updates_one_daily_journal_and_moves_completed_next_item() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("tincan-journal-{unique}"));
+        fs::create_dir_all(&repo).unwrap();
+        initialize(&repo).unwrap();
+
+        update_journal(
+            &repo,
+            "2026-08-05",
+            "2026-08-05T09:00:00+02:00",
+            &[],
+            &["Should this be shared?".into()],
+            &["Implement journal".into()],
+        )
+        .unwrap();
+        update_journal(
+            &repo,
+            "2026-08-05",
+            "2026-08-05T10:00:00+02:00",
+            &["Implement journal".into()],
+            &["Should this be shared?".into()],
+            &[],
+        )
+        .unwrap();
+
+        let path = repo.join(".tincan/journal/2026-08-05.md");
+        let content = fs::read_to_string(path).unwrap();
+        assert_eq!(content.matches("- Implement journal").count(), 1);
+        assert_eq!(content.matches("- Should this be shared?").count(), 1);
+        assert!(content.contains("created_at: \"2026-08-05T09:00:00+02:00\""));
+        fs::remove_dir_all(repo).unwrap();
     }
 }
