@@ -6,6 +6,22 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-08-06
+
+### Added
+
+- Add one living `.tincan/plan.md` for outcome-level planned work and ideas.
+- Let journals summarize decisions, learnings, planned work, open questions,
+  and next steps alongside completed work.
+
+### Changed
+
+- Define a Tincan workspace by its `.tincan/config.toml` rather than a Git root.
+- Support non-Git parent workspaces containing multiple nested Git repositories,
+  with `changes` aggregating workspace-relative paths across them.
+- Teach the bundled skill to reconcile the plan and journal during natural
+  end-of-session wrap-ups.
+
 ## [0.2.1] - 2026-08-06
 
 ### Changed

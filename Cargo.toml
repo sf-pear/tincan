@@ -1,8 +1,8 @@
 [package]
 name = "tincan-cli"
-version = "0.2.1"
+version = "0.3.0"
 edition = "2024"
-description = "Preserve important development decisions, learnings, and progress in repository-local Markdown"
+description = "Preserve development plans, decisions, learnings, and progress in workspace-local Markdown"
 license = "MIT"
 readme = "README.md"
 repository = "https://github.com/sf-pear/tincan"
