@@ -1,108 +1,59 @@
 ---
 name: tincan
-description: Maintain private, repository-local development continuity with Tincan's daily journal, accepted decisions, and evidence-supported learnings. Use when working in a Git checkout where Tincan memory exists or could help, including when `.tincan/config.toml` is absent and initialization should be offered, when resuming prior work, when meaningful implementation progress or open work should be journaled, or when durable reasoning should remain available to future people and agents.
+description: Maintain private workspace-local development continuity with Tincan's plan, daily journal, accepted decisions, and evidence-supported learnings. Use when a workspace has or could benefit from `.tincan/config.toml`, when resuming work, or when the user asks to wrap up, finish for today, record what was learned, or prepare to continue tomorrow.
 ---
 
 # Tincan
 
-Treat Markdown under `.tincan/` as canonical private memory for this checkout.
-Treat transcripts and conversation summaries as evidence, not accepted truth.
+Treat Markdown under `.tincan/` as canonical private project memory. A Tincan
+workspace may contain zero, one, or several Git repositories.
 
 ## Start work
 
-1. Read `AGENTS.md` when present.
-2. Confirm Tincan is available with `tincan --help`. If the command is missing,
-   briefly explain that the skill is installed but the CLI is not, suggest
-   `cargo install tincan-cli`, and continue the user's work without Tincan.
-3. Check for `.tincan/config.toml`. If it is absent, offer to initialize Tincan
-   in the current Git repository. Prefer the harness's structured user-question
-   tool when one is available, with clear `Initialize Tincan` and `Not now`
-   choices. Do not assume consent. If the user chooses initialization, run
-   `tincan init <repository>`. If they decline, do not answer, or the session is
-   non-interactive, continue without Tincan and do not ask again during the same
-   task.
-4. After confirming or creating `.tincan/config.toml`, read
-   `.tincan/AGENT_GUIDE.md`.
-5. Run `tincan resume` to read the latest daily journal before continuing prior
-   work.
-6. Run `tincan changes` when touching an area with existing memory.
-7. Search focused files, features, or concepts with `tincan search "<query>"`.
-8. Load only relevant full records with `tincan show <record-id>`.
+1. Confirm `tincan --help` works. If not, suggest `cargo install tincan-cli`
+   and continue without Tincan.
+2. Find `.tincan/config.toml` in the current directory or an ancestor. If none
+   exists, offer to run `tincan init <directory>` through the harness's standard
+   user-question tool with `Initialize Tincan` and `Not now` choices. Never run
+   `tincan init` without the user's explicit confirmation.
+3. Read `.tincan/AGENT_GUIDE.md`.
+4. Run `tincan plan`, then `tincan resume`.
+5. Run `tincan changes` when existing file-linked memory may matter. Search
+   focused terms with `tincan search`, and load relevant records with `show`.
 
-Never run `tincan init` without the user's explicit confirmation.
+## Maintain the plan
 
-## Classify before writing
+Edit `.tincan/plan.md` directly. Keep only current outcome-level work and ideas.
+Do not turn it into an implementation checklist or duplicate an issue tracker.
+Remove completed items because the journal preserves their history.
 
-Use this test:
+## Classify memory
 
-- **Journal:** Does this describe what was implemented today, an unresolved
-  question, or concrete work still to do? Add one concise `--done`, `--question`,
-  or `--next` bullet. Do not put full reasoning here.
-- **Learning:** Did evidence establish knowledge that will remain useful beyond
-  today's work? Record the conclusion, evidence, scope, and reconsideration
-  conditions. A failed approach qualifies only when it taught something durable.
-- **Decision:** Was a choice accepted that constrains future work? Record the
-  choice, reasoning, consequences, and constraints. Do not record proposals or
-  open questions as decisions.
+- Journal bullets summarize meaningful completed work, decisions, learnings,
+  planned work, open questions, and the concrete next starting point.
+- `tincan decide <statement>` records an accepted choice that constrains future
+  work. Use `--supersedes <uuid>` when replacing an active decision.
+- `tincan learn <statement>` records a conclusion supported by evidence and
+  useful beyond the current session.
 
-A meaningful completed change may produce a short journal bullet plus a decision
-or learning. Avoid repeated prose: the journal records progress; the durable
-record holds the reasoning.
+Use workspace-relative `--file` paths. Let Tincan create UUIDs and frontmatter,
+then add useful detail below the generated H1. Do not record routine edits,
+speculation, raw transcripts, credentials, or customer data.
 
-## Use the commands
+## Wrap up
 
-Update the one living journal file for the local calendar day as work develops:
+Treat natural requests such as "wrap up", "done for today", "good night",
+"what did we learn", and "where do I start tomorrow" as a wrap-up request.
 
-```text
-tincan journal --done <implemented item>
-tincan journal --question <unresolved question>
-tincan journal --next <unfinished item>
-```
+1. Review the conversation, current journal, and plan for meaningful completed
+   work, accepted decisions, evidence-supported learnings, remaining plans,
+   open questions, and the next starting point.
+2. Record any missed durable decisions or learnings. Do not invent acceptance
+   or evidence.
+3. Update `.tincan/plan.md` so it reflects only current direction.
+4. Update today's journal with repeatable `--done`, `--decision`, `--learning`,
+   `--planned`, `--question`, and `--next` options. Keep bullets short.
+5. Run `tincan resume` and show the finalized journal to the user.
 
-Add bullets after meaningful developments, not after routine edits or commands.
-Tincan ignores exact duplicates. If the exact text of a `Next` bullet is later
-added as `Done`, Tincan moves it rather than retaining stale duplication.
-
-- Run `tincan decide <statement>` only after a choice is accepted. Use
-  `--supersedes <uuid>` when it replaces an earlier decision. Do not pass a
-  status; Tincan creates decisions as `active` and manages supersession.
-- Run `tincan learn <statement>` only when evidence supports a reusable
-  conclusion. Learnings do not have a status.
-- Use repository-relative `--file` values, focused `--topic` values, concrete
-  `--evidence`, and `--related` UUIDs where useful.
-
-Use only these record shapes:
-
-```text
-tincan decide <statement> [--file <path>] [--topic <text>] [--evidence <text>] [--related <uuid>] [--supersedes <uuid>]
-tincan learn <statement> [--file <path>] [--topic <text>] [--evidence <text>] [--related <uuid>]
-```
-
-Repeat bracketed metadata options when needed. Tincan prints the created UUID
-and Markdown path. Add detailed context, reasoning, consequences, scope, and
-reconsideration conditions directly beneath the H1 in that file. Do not edit
-the generated frontmatter or invent another record type or option.
-
-Do not create decisions or learnings for routine edits, progress updates,
-speculation, todos, or facts already obvious from the code. Put meaningful
-progress and open work in the journal instead.
-
-If Tincan rejects a record, follow the corrective error, fix the arguments, and
-retry. Always let Tincan create the UUID and frontmatter; edit only the Markdown
-body directly afterward.
-
-## Maintain truth and privacy
-
-- Never convert a suggestion into an accepted decision without confirmation.
-- Record only evidence and verification that actually exist.
-- Never store credentials, access tokens, customer data, or raw transcripts.
-- Do not let bookkeeping block the requested development work; report failures
-  and continue safely when possible.
-
-## Finish work
-
-After meaningful work, ensure its journal bullets reflect what is done, what is
-still open, and what should happen next. Record accepted decisions and durable,
-evidence-supported learnings when warranted. Mention created or updated Tincan
-artifacts in the final response. Do not use Tincan as a general task tracker or
-publishing tool.
+Distinguish implemented and verified work from work that was only decided or
+planned. Do not let bookkeeping block the user's main work.

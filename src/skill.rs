@@ -410,11 +410,12 @@ mod tests {
 
     #[test]
     fn bundled_skill_offers_initialization_without_assuming_consent() {
-        assert!(SKILL.contains("structured"));
+        assert!(SKILL.contains("user-question tool"));
         assert!(SKILL.contains("user-question"));
         assert!(SKILL.contains("Initialize Tincan"));
         assert!(SKILL.contains("Not now"));
-        assert!(SKILL.contains("Never run `tincan init` without the user's explicit confirmation"));
+        assert!(SKILL.contains("Never run"));
+        assert!(SKILL.contains("without the user's explicit confirmation"));
     }
 
     #[test]
