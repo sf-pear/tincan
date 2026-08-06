@@ -6,6 +6,43 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Replace the generic `record` command with `decide <statement>` and
+  `learn <statement>`.
+- Create durable records with pure UUID v7 identities and UUID filenames while
+  keeping type information in validated frontmatter.
+- Generate a concise H1 scaffold and let people or agents expand the Markdown
+  body directly without duplicating the statement as title metadata.
+- Rank deterministic search across exact IDs, headings, metadata, and full
+  Markdown bodies, with compact matching excerpts.
+- Advance newly initialized repository storage to version 2 for the UUID record
+  format.
+- Simplify the sole check operation from `tincan check --changed` to
+  `tincan check`.
+- Rename `tincan inspect` to `tincan summary`.
+- Replace `--repo` with `-d, --directory` for running a command against another
+  working directory while keeping journal options explicit.
+- Expand command help with concepts, examples, record-ID discovery, and the
+  distinction between `show` and reading canonical Markdown directly.
+- Print the stable record ID after creating a decision or learning.
+- Detect existing user-wide Agent Skills harnesses, select all by default in a
+  standard arrow-key and Space picker, and require confirmation before writing.
+- Show the picker's navigation, selection, continuation, and cancellation keys
+  directly above the interactive choices.
+- Apply a colorful terminal theme to the interactive destination picker and
+  confirmation while keeping command output pipe-friendly.
+- Configure Dialoguer's standard confirmation to wait for Enter after a yes or
+  no answer instead of resolving on the first keypress.
+- Teach the bundled skill to offer repository initialization through a
+  harness-provided structured question while requiring explicit consent.
+- Add one centralized, color-configurable terminal logo used by help,
+  initialization, and skill installation without affecting piped output.
+- Keep `--path` as the explicit non-interactive installation route and preflight
+  all selected destinations before writing any skill files.
+- Add black-box tests for the compiled binary's help, error stream, and failure
+  exit behavior.
+
 ## [0.1.0] - 2026-08-06
 
 ### Added

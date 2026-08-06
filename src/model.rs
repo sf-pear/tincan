@@ -64,10 +64,9 @@ impl Kind {
 pub struct Record {
     pub id: String,
     pub kind: Kind,
-    pub timestamp: u64,
-    pub title: String,
+    pub created_at: String,
+    pub statement: String,
     pub status: Option<DecisionStatus>,
-    pub note: String,
     pub files: Vec<String>,
     pub topics: Vec<String>,
     pub evidence: Vec<String>,
@@ -85,8 +84,7 @@ impl Record {
         if let Some(status) = self.status {
             field(&mut output, "status", status.as_str());
         }
-        output.push_str(&format!("created_at_unix: {}\n", self.timestamp));
-        field(&mut output, "title", &self.title);
+        field(&mut output, "created_at", &self.created_at);
         field(&mut output, "branch", &self.branch);
         list(&mut output, "files", &self.files);
         list(&mut output, "topics", &self.topics);
@@ -95,9 +93,7 @@ impl Record {
         output.push_str("superseded_by:\n");
         output.push_str("---\n\n");
         output.push_str("# ");
-        output.push_str(&self.title);
-        output.push_str("\n\n");
-        output.push_str(self.note.trim());
+        output.push_str(&self.statement);
         output.push_str("\n\n");
         if !self.evidence.is_empty() {
             output.push_str("## Evidence\n\n");
@@ -129,5 +125,34 @@ fn bullets(output: &mut String, values: &[String]) {
         output.push_str("- ");
         output.push_str(value);
         output.push('\n');
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn renders_managed_frontmatter_and_an_editable_markdown_body() {
+        let record = Record {
+            id: "019c4ea8-7e42-7b31-a211-8df9357d747c".to_string(),
+            kind: Kind::Learning,
+            created_at: "2026-08-06T10:00:00Z".to_string(),
+            statement: "Paging did not reduce rendering work".to_string(),
+            status: None,
+            files: vec!["src/gallery.rs".to_string()],
+            topics: vec!["performance".to_string()],
+            evidence: vec!["Release trace".to_string()],
+            related: Vec::new(),
+            supersedes: Vec::new(),
+            branch: "main".to_string(),
+        };
+
+        let rendered = record.render();
+        assert!(rendered.contains("id: \"019c4ea8-7e42-7b31-a211-8df9357d747c\""));
+        assert!(rendered.contains("created_at: \"2026-08-06T10:00:00Z\""));
+        assert!(rendered.contains("# Paging did not reduce rendering work"));
+        assert!(rendered.contains("## Evidence\n\n- Release trace"));
+        assert!(!rendered.contains("title:"));
     }
 }

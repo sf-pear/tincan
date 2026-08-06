@@ -1,15 +1,18 @@
+use crate::branding;
 use crate::cli::{self, Command, JournalArgs, RecordArgs};
 use crate::git;
 use crate::model::{DecisionStatus, Kind, Record};
 use crate::skill::{self, InstallOutcome};
 use crate::store;
-use crate::util::{display_path, slug, unix_timestamp};
+use crate::util::display_path;
 use chrono::{Local, SecondsFormat};
 use std::collections::BTreeMap;
+use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
     match command? {
         Command::Help => {
+            branding::print();
             print!("{}", cli::help());
             Ok(())
         }
@@ -18,26 +21,52 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
             Ok(())
         }
         Command::Init { repo } => init(repo),
-        Command::Inspect { repo } => inspect(repo),
+        Command::Summary { repo } => summary(repo),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
-        Command::CheckChanged { repo } => check_changed(repo),
+        Command::Check { repo } => check(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
     }
 }
 
 fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), String> {
-    match skill::install(path.as_deref(), force)? {
-        InstallOutcome::Installed(path) => {
-            println!("Installed Tincan skill at {}", display_path(&path));
-            println!("Restart or reload the agent harness to discover it.");
+    branding::print();
+    let roots = match path {
+        Some(path) => vec![path],
+        None => {
+            let detected = skill::detect_roots();
+            if detected.is_empty() {
+                return Err(
+                    "no supported Agent Skills destination was detected; pass `--path <skills-directory>`"
+                        .to_string(),
+                );
+            }
+            let Some(selected) = skill::choose_interactively(&detected)? else {
+                println!("Skill installation cancelled.");
+                return Ok(());
+            };
+            selected
         }
-        InstallOutcome::AlreadyCurrent(path) => {
-            println!("Tincan skill is already current at {}", display_path(&path));
+    };
+
+    let outcomes = skill::install_many(&roots, force)?;
+    let mut installed = false;
+    for outcome in outcomes {
+        match outcome {
+            InstallOutcome::Installed(path) => {
+                installed = true;
+                println!("Installed Tincan skill at {}", display_path(&path));
+            }
+            InstallOutcome::AlreadyCurrent(path) => {
+                println!("Tincan skill is already current at {}", display_path(&path));
+            }
         }
+    }
+    if installed {
+        println!("Restart or reload the agent harness to discover it.");
     }
     Ok(())
 }
@@ -49,6 +78,7 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
     let excluded = store::ensure_git_excluded(&exclude)?;
     git::verify_tincan_ignored(&root)?;
     let tincan = store::initialize(&root)?;
+    branding::print();
     println!("Initialized Tincan at {}", display_path(&tincan));
     if excluded {
         println!("Kept .tincan private through Git's local exclude file.");
@@ -58,7 +88,7 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn inspect(path: std::path::PathBuf) -> Result<(), String> {
+fn summary(path: std::path::PathBuf) -> Result<(), String> {
     let snapshot = git::snapshot(&path)?;
     let documents = store::scan(&snapshot.root)?;
     let mut counts = BTreeMap::new();
@@ -89,9 +119,9 @@ fn record(args: RecordArgs) -> Result<(), String> {
     }
     let snapshot = git::snapshot(&args.repo)?;
     store::require(&snapshot.root)?;
-    let timestamp = unix_timestamp()?;
     let kind = Kind::parse(&args.kind)?;
-    let id = format!("{}-{timestamp}-{}", kind.as_str(), slug(&args.title));
+    let id = Uuid::now_v7().to_string();
+    let created_at = Local::now().to_rfc3339_opts(SecondsFormat::Secs, true);
     let status = match kind {
         Kind::Decision => Some(DecisionStatus::Active),
         Kind::Learning => None,
@@ -101,10 +131,9 @@ fn record(args: RecordArgs) -> Result<(), String> {
     let record = Record {
         id,
         kind,
-        timestamp,
-        title: args.title.clone(),
+        created_at,
+        statement: args.statement,
         status,
-        note: args.note,
         files: args.files,
         topics: args.topics,
         evidence: args.evidence,
@@ -112,15 +141,11 @@ fn record(args: RecordArgs) -> Result<(), String> {
         supersedes: args.supersedes,
         branch: snapshot.branch,
     };
-    let path = store::write(
-        &snapshot.root,
-        kind,
-        timestamp,
-        &args.title,
-        &record.render(),
-    )?;
+    let path = store::write(&snapshot.root, kind, &record.id, &record.render())?;
     store::mark_superseded(&superseded, &record.id)?;
-    println!("Recorded {}: {}", kind.as_str(), display_path(&path));
+    println!("Created {}: {}", kind.as_str(), display_path(&path));
+    println!("Record ID: {}", record.id);
+    println!("Add detailed context directly to the Markdown body when useful.");
     if !superseded.is_empty() {
         println!("Superseded {} earlier decision(s).", superseded.len());
     }
@@ -165,16 +190,17 @@ fn resume(path: std::path::PathBuf) -> Result<(), String> {
 fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
     let root = git::repository_root(&path)?;
     let query = query.to_lowercase();
-    let matches: Vec<_> = store::scan(&root)?
+    let mut matches: Vec<_> = store::scan(&root)?
         .into_iter()
-        .filter(|document| metadata_text(document).to_lowercase().contains(&query))
+        .filter_map(|document| search_rank(&document, &query).map(|rank| (rank, document)))
         .collect();
+    matches.sort_by(|left, right| left.0.cmp(&right.0).then(left.1.path.cmp(&right.1.path)));
     if matches.is_empty() {
         println!("No Tincan records matched.");
         return Ok(());
     }
-    for document in matches {
-        print_document_summary(&document);
+    for (_, document) in matches {
+        print_document_summary(&document, Some(&query));
     }
     Ok(())
 }
@@ -189,11 +215,23 @@ fn show(path: std::path::PathBuf, id: &str) -> Result<(), String> {
     Ok(())
 }
 
+fn search_rank(document: &store::Document, query: &str) -> Option<u8> {
+    if document.id.to_lowercase() == query {
+        return Some(0);
+    }
+    if document.heading.to_lowercase().contains(query) {
+        return Some(1);
+    }
+    if metadata_text(document).to_lowercase().contains(query) {
+        return Some(2);
+    }
+    document.body.to_lowercase().contains(query).then_some(3)
+}
+
 fn metadata_text(document: &store::Document) -> String {
     [
         vec![
             document.id.clone(),
-            document.title.clone(),
             document.kind.clone(),
             document.status.clone().unwrap_or_default(),
         ],
@@ -207,14 +245,17 @@ fn metadata_text(document: &store::Document) -> String {
     .join("\n")
 }
 
-fn print_document_summary(document: &store::Document) {
+fn print_document_summary(document: &store::Document, query: Option<&str>) {
     let label = document
         .status
         .as_deref()
         .map(|status| format!("{} / {status}", document.kind))
         .unwrap_or_else(|| document.kind.clone());
-    println!("{} [{label}]", document.title);
+    println!("{} [{label}]", document.heading);
     println!("  id: {}", document.id);
+    if let Some(excerpt) = query.and_then(|query| matching_excerpt(document, query)) {
+        println!("  matched: {excerpt}");
+    }
     if !document.files.is_empty() {
         println!("  files: {}", document.files.join(", "));
     }
@@ -230,7 +271,29 @@ fn print_document_summary(document: &store::Document) {
     println!("  {}", display_path(&document.path));
 }
 
-fn check_changed(path: std::path::PathBuf) -> Result<(), String> {
+fn matching_excerpt(document: &store::Document, query: &str) -> Option<String> {
+    let query = query.to_lowercase();
+    document.body.lines().find_map(|line| {
+        let line = line.trim();
+        if line.is_empty()
+            || line.strip_prefix("# ") == Some(document.heading.as_str())
+            || !line.to_lowercase().contains(&query)
+        {
+            return None;
+        }
+        let cleaned = line
+            .trim_start_matches('#')
+            .trim_start_matches(['-', '*'])
+            .trim();
+        let mut excerpt: String = cleaned.chars().take(120).collect();
+        if cleaned.chars().count() > 120 {
+            excerpt.push('…');
+        }
+        Some(excerpt)
+    })
+}
+
+fn check(path: std::path::PathBuf) -> Result<(), String> {
     let root = git::repository_root(&path)?;
     let changed = git::changed_files(&root)?;
     if changed.is_empty() {
@@ -274,7 +337,7 @@ fn check_changed(path: std::path::PathBuf) -> Result<(), String> {
             .unwrap_or_else(|| document.kind.clone());
         println!(
             "  {} [{}]\n    matched: {}\n    {}",
-            document.title,
+            document.heading,
             label,
             matched.join(", "),
             display_path(&document.path)
@@ -294,11 +357,69 @@ fn paths_overlap(changed: &str, affected: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs::{self, OpenOptions};
+    use std::io::Write;
+    use std::process::Command as ProcessCommand;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     #[test]
     fn matches_files_and_directories() {
         assert!(paths_overlap("src/feature/a.rs", "src/feature"));
         assert!(paths_overlap("src/feature", "src/feature/a.rs"));
         assert!(!paths_overlap("src/a.rs", "src/b.rs"));
+    }
+
+    #[test]
+    fn creates_uuid_record_that_remains_searchable_after_body_edits() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("tincan-uuid-record-{unique}"));
+        fs::create_dir_all(&repo).unwrap();
+        assert!(
+            ProcessCommand::new("git")
+                .args(["init", "--quiet"])
+                .current_dir(&repo)
+                .status()
+                .unwrap()
+                .success()
+        );
+        store::initialize(&repo).unwrap();
+
+        record(RecordArgs {
+            kind: "learning".to_string(),
+            repo: repo.clone(),
+            statement: "Paging did not reduce rendering work".to_string(),
+            files: vec!["src/gallery.rs".to_string()],
+            topics: vec!["performance".to_string()],
+            evidence: vec!["Release trace".to_string()],
+            related: Vec::new(),
+            supersedes: Vec::new(),
+        })
+        .unwrap();
+
+        let document = store::scan(&repo).unwrap().remove(0);
+        assert!(Uuid::parse_str(&document.id).is_ok());
+        assert_eq!(
+            document.path.file_stem().and_then(|value| value.to_str()),
+            Some(document.id.as_str())
+        );
+        writeln!(
+            OpenOptions::new()
+                .append(true)
+                .open(&document.path)
+                .unwrap(),
+            "The renderer remained the measured bottleneck."
+        )
+        .unwrap();
+
+        let edited = store::scan(&repo).unwrap().remove(0);
+        assert_eq!(search_rank(&edited, "renderer"), Some(3));
+        assert_eq!(
+            matching_excerpt(&edited, "renderer").as_deref(),
+            Some("The renderer remained the measured bottleneck.")
+        );
+        fs::remove_dir_all(repo).unwrap();
     }
 }

@@ -1,15 +1,17 @@
 [package]
 name = "tincan-cli"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
-description = "Capture important decisions, their reasoning, and learnings from agent coding sessions in plain Markdown"
+description = "Preserve important development decisions, learnings, and progress in repository-local Markdown"
 license = "MIT"
+readme = "README.md"
 repository = "https://github.com/sf-pear/tincan"
 rust-version = "1.85"
 keywords = ["cli", "developer-tools", "git", "markdown", "documentation"]
 categories = ["command-line-utilities", "development-tools"]
 include = [
     "/src/**",
+    "/tests/**",
     "/skills/tincan/**",
     "/docs/**",
     "/Cargo.toml",
@@ -21,6 +23,9 @@ include = [
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
+console = "0.16.4"
+dialoguer = { version = "0.12.0", default-features = false }
+uuid = { version = "1.24.0", features = ["v7"] }
 
 [[bin]]
 name = "tincan"

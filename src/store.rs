@@ -1,7 +1,6 @@
 use crate::model::{DecisionStatus, Kind};
-use crate::util::slug;
 use std::fs;
-use std::io::{BufRead, BufReader};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const AGENT_GUIDE: &str = r#"# Tincan Agent Guide
@@ -12,7 +11,7 @@ is canonical and locally excluded from Git by default.
 ## Resume work
 
 1. Run `tincan resume` to read the latest daily journal.
-2. Run `tincan check --changed` when touching existing work.
+2. Run `tincan check` when touching existing work.
 3. Search focused terms with `tincan search "<file, feature, or concept>"`.
 4. Use `tincan show <record-id>` only for relevant full records.
 
@@ -22,30 +21,35 @@ is canonical and locally excluded from Git by default.
 - Add unresolved matters with `journal --question` and concrete unfinished work
   with `journal --next`. Journal entries answer what happened today or what is
   currently open; they are not durable conclusions.
-- Record a decision only when a choice is accepted and constrains future work.
-- Use `--supersedes <decision-id>` when a new decision replaces an old one.
+- Run `tincan decide <statement>` only when a choice is accepted and constrains
+  future work.
+- Use `--supersedes <uuid>` when a new decision replaces an old one.
 - Do not pass decision status; Tincan manages `active` and `superseded`.
-- Record a learning only when evidence supports knowledge useful beyond today's
-  work. A failed approach is a learning only when it yields a durable conclusion.
+- Run `tincan learn <statement>` only when evidence supports knowledge useful
+  beyond today's work. A failed approach is a learning only when it yields a
+  durable conclusion.
 - Do not pass status for learnings; they do not have one.
 - Do not turn open questions, todos, progress, or speculation into decisions or
   learnings. Keep those in the journal.
 - Keep journal bullets brief. Put full reasoning in decisions and learnings
   rather than duplicating it in the journal.
 - If record validation fails, correct the arguments described by the error and
-  retry. Do not bypass validation by writing the record file manually.
+  retry. Let Tincan create UUIDs and frontmatter, then add detailed context
+  directly to the Markdown body beneath its H1.
 
 Do not store credentials, customer data, or complete raw transcripts in Tincan.
 Raw session text is evidence, not accepted project truth.
 "#;
 
 const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
+const CONFIG: &str = "# Tincan repository configuration\nversion = 2\nstorage = \"markdown\"\n";
 
 #[derive(Debug)]
 pub struct Document {
     pub path: PathBuf,
     pub id: String,
-    pub title: String,
+    pub heading: String,
+    pub body: String,
     pub kind: String,
     pub status: Option<String>,
     pub files: Vec<String>,
@@ -65,11 +69,10 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
     }
     let config = root.join("config.toml");
     if !config.exists() {
-        fs::write(
-            &config,
-            "# Tincan repository configuration\nversion = 1\nstorage = \"markdown\"\n",
-        )
-        .map_err(|error| format!("cannot write {}: {error}", config.display()))?;
+        fs::write(&config, CONFIG)
+            .map_err(|error| format!("cannot write {}: {error}", config.display()))?;
+    } else {
+        validate_config(&config)?;
     }
     let guide = root.join("AGENT_GUIDE.md");
     if !guide.exists() {
@@ -107,13 +110,15 @@ pub fn ensure_git_excluded(path: &Path) -> Result<bool, String> {
 
 pub fn require(repo: &Path) -> Result<PathBuf, String> {
     let root = repo.join(".tincan");
-    if !root.join("config.toml").is_file() {
+    let config = root.join("config.toml");
+    if !config.is_file() {
         return Err(format!(
             "{} is not initialized; run `tincan init {}`",
             repo.display(),
             repo.display()
         ));
     }
+    validate_config(&config)?;
     for directory in DIRECTORIES {
         fs::create_dir_all(root.join(directory))
             .map_err(|error| format!("cannot create .tincan/{directory}: {error}"))?;
@@ -121,20 +126,35 @@ pub fn require(repo: &Path) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-pub fn write(
-    repo: &Path,
-    kind: Kind,
-    timestamp: u64,
-    title: &str,
-    content: &str,
-) -> Result<PathBuf, String> {
-    let root = require(repo)?;
-    let filename = format!("{timestamp}-{}.md", slug(title));
-    let path = root.join(kind.directory()).join(filename);
-    if path.exists() {
-        return Err(format!("record already exists: {}", path.display()));
+fn validate_config(path: &Path) -> Result<(), String> {
+    let config = fs::read_to_string(path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    if config.lines().any(|line| line.trim() == "version = 2") {
+        Ok(())
+    } else {
+        Err(format!(
+            "{} uses an unsupported Tincan storage version; expected version 2",
+            path.parent().unwrap_or(path).display()
+        ))
     }
-    fs::write(&path, content)
+}
+
+pub fn write(repo: &Path, kind: Kind, id: &str, content: &str) -> Result<PathBuf, String> {
+    let root = require(repo)?;
+    let filename = format!("{id}.md");
+    let path = root.join(kind.directory()).join(filename);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("record already exists: {}", path.display())
+            } else {
+                format!("cannot write {}: {error}", path.display())
+            }
+        })?;
+    file.write_all(content.as_bytes())
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(path)
 }
@@ -248,10 +268,9 @@ fn render_journal(
     next: &[String],
 ) -> String {
     let mut output = format!(
-        "---\nid: {}\ntype: \"journal\"\ncreated_at: {}\ntitle: {}\n---\n\n# {date}\n",
+        "---\nid: {}\ntype: \"journal\"\ncreated_at: {}\n---\n\n# {date}\n",
         crate::util::yaml_string(&format!("journal-{date}")),
         crate::util::yaml_string(created_at),
-        crate::util::yaml_string(date),
     );
     for (heading, values) in [
         ("Done", done),
@@ -291,8 +310,9 @@ fn collect_documents(path: &Path, output: &mut Vec<Document>) -> Result<(), Stri
         if file_path.extension().and_then(|value| value.to_str()) != Some("md") {
             continue;
         }
-        let frontmatter = read_frontmatter(&file_path)?;
-        output.push(parse_document(file_path, frontmatter)?);
+        let text = fs::read_to_string(&file_path)
+            .map_err(|error| format!("cannot read {}: {error}", file_path.display()))?;
+        output.push(parse_document(file_path, text)?);
     }
     Ok(())
 }
@@ -301,14 +321,67 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
     let kind = scalar(&text, "type").unwrap_or_default();
     let status = scalar(&text, "status");
     validate_record_status(&path, &kind, status.as_deref())?;
+    let id = scalar(&text, "id").unwrap_or_default();
+    if id.is_empty() {
+        return Err(format!(
+            "invalid frontmatter in {}: id is required",
+            path.display()
+        ));
+    }
+    if matches!(kind.as_str(), "decision" | "learning") {
+        uuid::Uuid::parse_str(&id).map_err(|_| {
+            format!(
+                "invalid frontmatter in {}: decision and learning ids must be UUIDs",
+                path.display()
+            )
+        })?;
+        if scalar(&text, "created_at").is_none() {
+            return Err(format!(
+                "invalid frontmatter in {}: created_at is required",
+                path.display()
+            ));
+        }
+        for field in ["related", "supersedes", "superseded_by"] {
+            for related_id in yaml_list(&text, field) {
+                if uuid::Uuid::parse_str(&related_id).is_err() {
+                    return Err(format!(
+                        "invalid frontmatter in {}: {field} values must be UUIDs",
+                        path.display()
+                    ));
+                }
+            }
+        }
+    }
+    let body = markdown_body(&text);
+    let parsed_heading = body
+        .lines()
+        .find_map(|line| line.strip_prefix("# ").map(str::trim))
+        .filter(|heading| !heading.is_empty())
+        .map(str::to_string);
+    if matches!(kind.as_str(), "decision" | "learning") && parsed_heading.is_none() {
+        return Err(format!(
+            "invalid Markdown in {}: decision and learning records require an H1 heading",
+            path.display()
+        ));
+    }
+    let heading = parsed_heading.unwrap_or_else(|| {
+        path.file_stem()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string()
+    });
+    if matches!(kind.as_str(), "decision" | "learning")
+        && path.file_stem().and_then(|value| value.to_str()) != Some(id.as_str())
+    {
+        return Err(format!(
+            "invalid frontmatter in {}: UUID filename and id do not match",
+            path.display()
+        ));
+    }
     Ok(Document {
-        id: scalar(&text, "id").unwrap_or_default(),
-        title: scalar(&text, "title").unwrap_or_else(|| {
-            path.file_stem()
-                .unwrap_or_default()
-                .to_string_lossy()
-                .to_string()
-        }),
+        id,
+        heading,
+        body,
         kind,
         status,
         files: yaml_list(&text, "files"),
@@ -328,7 +401,7 @@ fn validate_record_status(path: &Path, kind: &str, status: Option<&str>) -> Resu
         ("learning", Some(_)) => Err("learnings must not have a status".to_string()),
         ("journal", None) => Ok(()),
         ("journal", Some(_)) => Err("journal entries must not have a status".to_string()),
-        _ => Ok(()),
+        _ => Err(format!("unsupported record type: {kind}")),
     };
     result.map_err(|error| format!("invalid frontmatter in {}: {error}", path.display()))
 }
@@ -361,7 +434,8 @@ pub fn active_decisions(repo: &Path, ids: &[String]) -> Result<Vec<Document>, St
         decisions.push(Document {
             path: document.path.clone(),
             id: document.id.clone(),
-            title: document.title.clone(),
+            heading: document.heading.clone(),
+            body: document.body.clone(),
             kind: document.kind.clone(),
             status: document.status.clone(),
             files: document.files.clone(),
@@ -384,28 +458,17 @@ pub fn mark_superseded(decisions: &[Document], replacement_id: &str) -> Result<(
     Ok(())
 }
 
-fn read_frontmatter(path: &Path) -> Result<String, String> {
-    let file =
-        fs::File::open(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    let mut lines = BufReader::new(file).lines();
-    let Some(first) = lines.next() else {
-        return Ok(String::new());
-    };
-    let first = first.map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-    if first != "---" {
-        return Ok(String::new());
+fn markdown_body(text: &str) -> String {
+    let mut lines = text.lines();
+    if lines.next() != Some("---") {
+        return text.to_string();
     }
-
-    let mut output = String::from("---\n");
-    for line in lines {
-        let line = line.map_err(|error| format!("cannot read {}: {error}", path.display()))?;
-        output.push_str(&line);
-        output.push('\n');
+    for line in &mut lines {
         if line == "---" {
-            break;
+            return lines.collect::<Vec<_>>().join("\n");
         }
     }
-    Ok(output)
+    String::new()
 }
 
 fn add_supersession(text: &str, replacement_id: &str) -> Result<String, String> {
@@ -500,15 +563,20 @@ mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    const TEST_ID: &str = "019c4ea8-7e42-7b31-a211-8df9357d747c";
+
     #[test]
     fn parses_frontmatter_index_fields() {
         let document = parse_document(
-            PathBuf::from("test.md"),
-            "---\nid: \"a\"\ntype: \"decision\"\nstatus: \"active\"\ntitle: \"Paging\"\nfiles:\n  - \"src/a.rs\"\ntopics:\n  - \"performance\"\nrelated:\nsupersedes:\nsuperseded_by:\n---\n"
-                .to_string(),
+            PathBuf::from(format!("{TEST_ID}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"decision\"\nstatus: \"active\"\ncreated_at: \"2026-08-06T10:00:00Z\"\nfiles:\n  - \"src/a.rs\"\ntopics:\n  - \"performance\"\nrelated:\nsupersedes:\nsuperseded_by:\n---\n\n# Paging did not help\n\nDetailed renderer evidence.\n"
+            ),
         )
         .unwrap();
-        assert_eq!(document.id, "a");
+        assert_eq!(document.id, TEST_ID);
+        assert_eq!(document.heading, "Paging did not help");
+        assert!(document.body.contains("Detailed renderer evidence."));
         assert_eq!(document.files, vec!["src/a.rs"]);
         assert_eq!(document.topics, vec!["performance"]);
     }
@@ -516,24 +584,52 @@ mod tests {
     #[test]
     fn rejects_invented_decision_statuses_and_status_on_learnings() {
         let invented = parse_document(
-            PathBuf::from("decision.md"),
-            "---\nid: \"a\"\ntype: \"decision\"\nstatus: \"mostly-active\"\n---\n".to_string(),
+            PathBuf::from(format!("{TEST_ID}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"decision\"\nstatus: \"mostly-active\"\ncreated_at: \"2026-08-06T10:00:00Z\"\n---\n\n# Choice\n"
+            ),
         )
         .unwrap_err();
         assert!(invented.contains("invalid decision status"));
 
         let learning = parse_document(
-            PathBuf::from("learning.md"),
-            "---\nid: \"b\"\ntype: \"learning\"\nstatus: \"accepted\"\n---\n".to_string(),
+            PathBuf::from(format!("{TEST_ID}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"learning\"\nstatus: \"accepted\"\ncreated_at: \"2026-08-06T10:00:00Z\"\n---\n\n# Fact\n"
+            ),
         )
         .unwrap_err();
         assert!(learning.contains("learnings must not have a status"));
 
         parse_document(
-            PathBuf::from("learning.md"),
-            "---\nid: \"b\"\ntype: \"learning\"\ntitle: \"A reusable fact\"\n---\n".to_string(),
+            PathBuf::from(format!("{TEST_ID}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"learning\"\ncreated_at: \"2026-08-06T10:00:00Z\"\n---\n\n# A reusable fact\n"
+            ),
         )
         .unwrap();
+    }
+
+    #[test]
+    fn rejects_mismatched_uuid_filename_and_missing_heading() {
+        let other = "019c4ea8-7e42-7b31-a211-8df9357d747d";
+        let mismatch = parse_document(
+            PathBuf::from(format!("{other}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"learning\"\ncreated_at: \"2026-08-06T10:00:00Z\"\n---\n\n# Fact\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(mismatch.contains("UUID filename and id do not match"));
+
+        let missing_heading = parse_document(
+            PathBuf::from(format!("{TEST_ID}.md")),
+            format!(
+                "---\nid: \"{TEST_ID}\"\ntype: \"learning\"\ncreated_at: \"2026-08-06T10:00:00Z\"\n---\n\nBody without a heading.\n"
+            ),
+        )
+        .unwrap_err();
+        assert!(missing_heading.contains("require an H1 heading"));
     }
 
     #[test]
@@ -569,11 +665,39 @@ mod tests {
         let root = initialize(&repo).unwrap();
         assert_eq!(root, repo.join(".tincan"));
         assert!(root.join("config.toml").is_file());
+        assert_eq!(
+            fs::read_to_string(root.join("config.toml")).unwrap(),
+            CONFIG
+        );
         assert!(root.join("AGENT_GUIDE.md").is_file());
         for directory in DIRECTORIES {
             assert!(root.join(directory).is_dir());
         }
 
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn rejects_older_storage_versions_instead_of_rewriting_them() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("tincan-old-layout-{unique}"));
+        fs::create_dir_all(repo.join(".tincan")).unwrap();
+        fs::write(
+            repo.join(".tincan/config.toml"),
+            "version = 1\nstorage = \"markdown\"\n",
+        )
+        .unwrap();
+
+        let error = initialize(&repo).unwrap_err();
+        assert!(error.contains("unsupported Tincan storage version"));
+        assert!(
+            fs::read_to_string(repo.join(".tincan/config.toml"))
+                .unwrap()
+                .contains("version = 1")
+        );
         fs::remove_dir_all(repo).unwrap();
     }
 

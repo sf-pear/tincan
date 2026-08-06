@@ -1,6 +1,6 @@
 ---
 name: tincan
-description: Maintain private, repository-local development continuity with Tincan's daily journal, accepted decisions, and evidence-supported learnings. Use when working in a Git checkout containing `.tincan/config.toml`, when resuming prior work, when meaningful implementation progress or open work should be journaled, or when durable reasoning should remain available to future people and agents.
+description: Maintain private, repository-local development continuity with Tincan's daily journal, accepted decisions, and evidence-supported learnings. Use when working in a Git checkout where Tincan memory exists or could help, including when `.tincan/config.toml` is absent and initialization should be offered, when resuming prior work, when meaningful implementation progress or open work should be journaled, or when durable reasoning should remain available to future people and agents.
 ---
 
 # Tincan
@@ -10,15 +10,26 @@ Treat transcripts and conversation summaries as evidence, not accepted truth.
 
 ## Start work
 
-1. Read `AGENTS.md` and `.tincan/AGENT_GUIDE.md`.
-2. Confirm Tincan is available with `tincan --help`.
-3. Run `tincan resume` to read the latest daily journal before continuing prior
+1. Read `AGENTS.md` when present.
+2. Confirm Tincan is available with `tincan --help`. If the command is missing,
+   briefly explain that the skill is installed but the CLI is not, suggest
+   `cargo install tincan-cli`, and continue the user's work without Tincan.
+3. Check for `.tincan/config.toml`. If it is absent, offer to initialize Tincan
+   in the current Git repository. Prefer the harness's structured user-question
+   tool when one is available, with clear `Initialize Tincan` and `Not now`
+   choices. Do not assume consent. If the user chooses initialization, run
+   `tincan init <repository>`. If they decline, do not answer, or the session is
+   non-interactive, continue without Tincan and do not ask again during the same
+   task.
+4. After confirming or creating `.tincan/config.toml`, read
+   `.tincan/AGENT_GUIDE.md`.
+5. Run `tincan resume` to read the latest daily journal before continuing prior
    work.
-4. Run `tincan check --changed` when touching an area with existing memory.
-5. Search focused files, features, or concepts with `tincan search "<query>"`.
-6. Load only relevant full records with `tincan show <record-id>`.
+6. Run `tincan check` when touching an area with existing memory.
+7. Search focused files, features, or concepts with `tincan search "<query>"`.
+8. Load only relevant full records with `tincan show <record-id>`.
 
-Do not run `tincan init` unless the user asks to initialize the repository.
+Never run `tincan init` without the user's explicit confirmation.
 
 ## Classify before writing
 
@@ -52,33 +63,33 @@ Add bullets after meaningful developments, not after routine edits or commands.
 Tincan ignores exact duplicates. If the exact text of a `Next` bullet is later
 added as `Done`, Tincan moves it rather than retaining stale duplication.
 
-- Record a `decision` only after a choice is accepted. Put the choice, reasoning,
-  consequences, and relevant constraints in `--note`. Use `--supersedes
-  <decision-id>` when it replaces an earlier decision. Do not pass a status;
-  Tincan creates decisions as `active` and manages supersession.
-- Record a `learning` only when evidence supports a reusable conclusion. Include
-  what became known, where it applies, and when it should be reconsidered.
-  Learnings do not have a status.
+- Run `tincan decide <statement>` only after a choice is accepted. Use
+  `--supersedes <uuid>` when it replaces an earlier decision. Do not pass a
+  status; Tincan creates decisions as `active` and manages supersession.
+- Run `tincan learn <statement>` only when evidence supports a reusable
+  conclusion. Learnings do not have a status.
 - Use repository-relative `--file` values, focused `--topic` values, concrete
-  `--evidence`, and `--related` record IDs where useful.
+  `--evidence`, and `--related` UUIDs where useful.
 
 Use only these record shapes:
 
 ```text
-tincan record decision --title <text> --note <markdown> [--file <path>] [--topic <text>] [--evidence <text>] [--related <id>] [--supersedes <decision-id>]
-tincan record learning --title <text> --note <markdown> [--file <path>] [--topic <text>] [--evidence <text>] [--related <id>]
+tincan decide <statement> [--file <path>] [--topic <text>] [--evidence <text>] [--related <uuid>] [--supersedes <uuid>]
+tincan learn <statement> [--file <path>] [--topic <text>] [--evidence <text>] [--related <uuid>]
 ```
 
-Repeat bracketed metadata options when needed. Never invent another record type
-or option.
+Repeat bracketed metadata options when needed. Tincan prints the created UUID
+and Markdown path. Add detailed context, reasoning, consequences, scope, and
+reconsideration conditions directly beneath the H1 in that file. Do not edit
+the generated frontmatter or invent another record type or option.
 
 Do not create decisions or learnings for routine edits, progress updates,
 speculation, todos, or facts already obvious from the code. Put meaningful
 progress and open work in the journal instead.
 
 If Tincan rejects a record, follow the corrective error, fix the arguments, and
-retry. Do not abandon a worthwhile record or bypass validation by writing its
-Markdown manually.
+retry. Always let Tincan create the UUID and frontmatter; edit only the Markdown
+body directly afterward.
 
 ## Maintain truth and privacy
 

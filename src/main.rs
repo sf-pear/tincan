@@ -1,3 +1,4 @@
+mod branding;
 mod cli;
 mod commands;
 mod git;
