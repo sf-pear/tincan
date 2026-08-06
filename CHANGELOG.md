@@ -6,6 +6,18 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-08-06
+
+### Fixed
+
+- Normalize Windows workspace and Git repository paths before comparing them,
+  avoiding false “outside Git repository” errors during initialization.
+
+### Changed
+
+- Default the final interactive `tincan skill install` confirmation to yes, so
+  pressing Enter installs into the selected destinations.
+
 ## [0.3.0] - 2026-08-06
 
 ### Added

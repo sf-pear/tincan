@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use crate::util::display_path;
 
 const SKILL: &str = include_str!("../skills/tincan/SKILL.md");
+const INSTALL_CONFIRM_DEFAULT: bool = true;
 const OPENAI_METADATA: &str = include_str!("../skills/tincan/agents/openai.yaml");
 const PICKER_HELP: &str =
     "[↑↓ move, Space select/unselect, A toggle all/none, Enter continue, Esc cancel]";
@@ -125,7 +126,7 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
                 selected.len(),
                 if selected.len() == 1 { "" } else { "s" }
             ))
-            .default(false)
+            .default(INSTALL_CONFIRM_DEFAULT)
             .wait_for_newline(true)
             .interact()
             .map_err(|error| format!("cannot read skill installation confirmation: {error}"))?;
@@ -386,6 +387,11 @@ mod tests {
             path: PathBuf::from("only/skills"),
         }];
         assert_eq!(default_selections(&roots), vec![true]);
+    }
+
+    #[test]
+    fn confirms_skill_installation_by_default() {
+        assert!(INSTALL_CONFIRM_DEFAULT);
     }
 
     #[test]

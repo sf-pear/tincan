@@ -19,7 +19,18 @@ pub fn repository_root(path: &Path) -> Result<Option<PathBuf>, String> {
         return Ok(None);
     }
     let root = String::from_utf8_lossy(&output.stdout).trim().to_string();
-    Ok((!root.is_empty()).then(|| PathBuf::from(root)))
+    if root.is_empty() {
+        return Ok(None);
+    }
+
+    // On Windows, `Path::canonicalize` commonly gives callers a verbatim
+    // `\\?\C:\...` path while Git prints the same directory as `C:/...`.
+    // Canonicalize Git's result as well so path-prefix operations compare two
+    // paths in the same representation.
+    PathBuf::from(&root)
+        .canonicalize()
+        .map(Some)
+        .map_err(|error| format!("cannot access Git repository {root}: {error}"))
 }
 
 pub fn branch(path: &Path) -> Result<String, String> {
@@ -32,7 +43,10 @@ pub fn branch(path: &Path) -> Result<String, String> {
 }
 
 pub fn protect_workspace(workspace: &Path) -> Result<Option<bool>, String> {
-    let Some(repo) = repository_root(workspace)? else {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| format!("cannot access workspace {}: {error}", workspace.display()))?;
+    let Some(repo) = repository_root(&workspace)? else {
         return Ok(None);
     };
     let relative = workspace.strip_prefix(&repo).map_err(|_| {
@@ -68,7 +82,10 @@ pub fn protect_workspace(workspace: &Path) -> Result<Option<bool>, String> {
 }
 
 pub fn workspace_changed_files(workspace: &Path) -> Result<Option<Vec<String>>, String> {
-    if let Some(repo) = repository_root(workspace)? {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| format!("cannot access workspace {}: {error}", workspace.display()))?;
+    if let Some(repo) = repository_root(&workspace)? {
         let relative = slash(workspace.strip_prefix(&repo).unwrap_or(Path::new("")));
         let files = changed_files(&repo)?
             .into_iter()
@@ -77,13 +94,13 @@ pub fn workspace_changed_files(workspace: &Path) -> Result<Option<Vec<String>>, 
         return Ok(Some(files.into_iter().collect()));
     }
 
-    let repositories = descendant_repositories(workspace)?;
+    let repositories = descendant_repositories(&workspace)?;
     if repositories.is_empty() {
         return Ok(None);
     }
     let mut files = BTreeSet::new();
     for repo in repositories {
-        let prefix = slash(repo.strip_prefix(workspace).unwrap_or(&repo));
+        let prefix = slash(repo.strip_prefix(&workspace).unwrap_or(&repo));
         for file in changed_files(&repo)? {
             files.insert(if prefix.is_empty() {
                 file
@@ -252,6 +269,19 @@ mod tests {
         assert!(
             status.is_empty(),
             "private memory appeared in status: {status}"
+        );
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn repository_root_uses_the_canonical_path_representation() {
+        let repo = temp("canonical-root");
+        fs::create_dir_all(&repo).unwrap();
+        run(&repo, &["init", "--quiet"]).unwrap();
+
+        assert_eq!(
+            repository_root(&repo).unwrap(),
+            Some(repo.canonicalize().unwrap())
         );
         fs::remove_dir_all(repo).unwrap();
     }

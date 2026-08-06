@@ -450,7 +450,7 @@ SKILL INSTALL
   Without --path, detect user-wide Agent Skills harnesses and select all by
   default. Use arrow keys to move, Space to select or unselect, A to toggle all
   or none, Enter to continue, and Escape to cancel. Every installation requires
-  answering a final y/N confirmation and pressing Enter. Use --path for an
+  answering a final Y/n confirmation; pressing Enter accepts. Use --path for an
   explicit, non-interactive or project-local destination.
 
 RECORD OPTIONS
