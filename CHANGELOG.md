@@ -6,6 +6,8 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-08-06
+
 ### Changed
 
 - Replace the generic `record` command with `decide <statement>` and
