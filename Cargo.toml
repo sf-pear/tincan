@@ -1,6 +1,6 @@
 [package]
 name = "tincan-cli"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 description = "Preserve important development decisions, learnings, and progress in repository-local Markdown"
 license = "MIT"

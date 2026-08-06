@@ -6,6 +6,18 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-08-06
+
+### Changed
+
+- Rename `tincan check` to `tincan changes` and group related memory directly
+  beside each Git-changed file.
+- Explain what each command does and when it is useful in the user guide.
+- Keep picker instructions beneath the skill destinations and summarize the
+  selected home-relative paths before confirmation.
+- Detect outdated installed Agent Skills after a CLI update and offer to update
+  them on the next interactive invocation without affecting scripted use.
+
 ## [0.2.0] - 2026-08-06
 
 ### Changed
