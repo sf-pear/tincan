@@ -5,44 +5,43 @@ use std::path::{Path, PathBuf};
 
 const AGENT_GUIDE: &str = r#"# Tincan Agent Guide
 
-Tincan is this checkout's private development memory. Markdown under `.tincan/`
-is canonical and locally excluded from Git by default.
+Tincan is this workspace's private development memory. The workspace may contain
+zero, one, or several Git repositories. Markdown under `.tincan/` is canonical.
 
-## Resume work
+## Start work
 
-1. Run `tincan resume` to read the latest daily journal.
-2. Run `tincan changes` when touching existing work.
-3. Search focused terms with `tincan search "<file, feature, or concept>"`.
-4. Use `tincan show <record-id>` only for relevant full records.
+1. Run `tincan plan` to read the living outcome-level direction.
+2. Run `tincan resume` to read the latest daily journal.
+3. Run `tincan changes` when file-linked history may matter.
+4. Use focused `search` queries and `show` only for relevant full records.
 
-## Classify information
+## Maintain memory
 
-- Add a concise `journal --done` bullet after a meaningful implementation.
-- Add unresolved matters with `journal --question` and concrete unfinished work
-  with `journal --next`. Journal entries answer what happened today or what is
-  currently open; they are not durable conclusions.
-- Run `tincan decide <statement>` only when a choice is accepted and constrains
-  future work.
-- Use `--supersedes <uuid>` when a new decision replaces an old one.
-- Do not pass decision status; Tincan manages `active` and `superseded`.
-- Run `tincan learn <statement>` only when evidence supports knowledge useful
-  beyond today's work. A failed approach is a learning only when it yields a
-  durable conclusion.
-- Do not pass status for learnings; they do not have one.
-- Do not turn open questions, todos, progress, or speculation into decisions or
-  learnings. Keep those in the journal.
-- Keep journal bullets brief. Put full reasoning in decisions and learnings
-  rather than duplicating it in the journal.
-- If record validation fails, correct the arguments described by the error and
-  retry. Let Tincan create UUIDs and frontmatter, then add detailed context
-  directly to the Markdown body beneath its H1.
+- Edit `.tincan/plan.md` directly. Keep current outcomes and ideas, not an
+  implementation checklist. Remove completed items; the journal keeps history.
+- Use short journal bullets for done, decisions, learnings, planned work, open
+  questions, and the next starting point.
+- Run `tincan decide <statement>` only for an accepted choice that constrains
+  future work. Use `--supersedes <uuid>` when replacing an active decision.
+- Run `tincan learn <statement>` only for an evidence-supported conclusion that
+  remains useful beyond the current session.
+- Use workspace-relative `--file` paths. Let Tincan create UUIDs and frontmatter,
+  then add useful detail below the H1.
 
-Do not store credentials, customer data, or complete raw transcripts in Tincan.
-Raw session text is evidence, not accepted project truth.
+## Wrap up
+
+When asked to wrap up, finish for today, record learnings, or prepare for
+tomorrow, reconcile the conversation, plan, journal, decisions, and learnings.
+Update the plan, write concise journal bullets, then run `tincan resume` so the
+user can review the finalized journal. Distinguish implemented work from work
+that was only decided or planned.
+
+Do not store credentials, customer data, or raw transcripts.
 "#;
 
 const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
-const CONFIG: &str = "# Tincan repository configuration\nversion = 2\nstorage = \"markdown\"\n";
+const CONFIG: &str = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
+const PLAN: &str = "# Plan\n\n## Planned\n\n<!-- none -->\n\n## Ideas\n\n<!-- none -->\n";
 
 #[derive(Debug)]
 pub struct Document {
@@ -79,19 +78,21 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
         fs::write(&guide, AGENT_GUIDE)
             .map_err(|error| format!("cannot write {}: {error}", guide.display()))?;
     }
+    let plan = root.join("plan.md");
+    if !plan.exists() {
+        fs::write(&plan, PLAN)
+            .map_err(|error| format!("cannot write {}: {error}", plan.display()))?;
+    }
     Ok(root)
 }
 
-pub fn ensure_git_excluded(path: &Path) -> Result<bool, String> {
+pub fn ensure_git_excluded(path: &Path, pattern: &str) -> Result<bool, String> {
     let existing = match fs::read_to_string(path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
     };
-    if existing
-        .lines()
-        .any(|line| matches!(line.trim(), ".tincan" | ".tincan/" | "/.tincan/"))
-    {
+    if existing.lines().any(|line| line.trim() == pattern) {
         return Ok(false);
     }
     if let Some(parent) = path.parent() {
@@ -102,7 +103,8 @@ pub fn ensure_git_excluded(path: &Path) -> Result<bool, String> {
     if !updated.is_empty() && !updated.ends_with('\n') {
         updated.push('\n');
     }
-    updated.push_str("/.tincan/\n");
+    updated.push_str(pattern);
+    updated.push('\n');
     fs::write(path, updated)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(true)
@@ -123,7 +125,19 @@ pub fn require(repo: &Path) -> Result<PathBuf, String> {
         fs::create_dir_all(root.join(directory))
             .map_err(|error| format!("cannot create .tincan/{directory}: {error}"))?;
     }
+    let plan = root.join("plan.md");
+    if !plan.exists() {
+        fs::write(&plan, PLAN)
+            .map_err(|error| format!("cannot write {}: {error}", plan.display()))?;
+    }
     Ok(root)
+}
+
+pub fn read_plan(repo: &Path) -> Result<(PathBuf, String), String> {
+    let path = require(repo)?.join("plan.md");
+    let content = fs::read_to_string(&path)
+        .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
+    Ok((path, content))
 }
 
 fn validate_config(path: &Path) -> Result<(), String> {
@@ -164,13 +178,20 @@ pub struct JournalUpdate {
     pub added: usize,
 }
 
+pub struct JournalSections<'a> {
+    pub done: &'a [String],
+    pub decisions: &'a [String],
+    pub learnings: &'a [String],
+    pub planned: &'a [String],
+    pub questions: &'a [String],
+    pub next: &'a [String],
+}
+
 pub fn update_journal(
     repo: &Path,
     date: &str,
     created_at: &str,
-    done: &[String],
-    questions: &[String],
-    next: &[String],
+    sections: JournalSections<'_>,
 ) -> Result<JournalUpdate, String> {
     let root = require(repo)?;
     let path = root.join("journal").join(format!("{date}.md"));
@@ -181,37 +202,54 @@ pub fn update_journal(
     };
     let original_created_at = scalar(&existing, "created_at").unwrap_or_else(|| created_at.into());
     let mut done_items = markdown_bullets(&existing, "## Done");
+    let mut decision_items = markdown_bullets(&existing, "## Decisions");
+    let mut learning_items = markdown_bullets(&existing, "## Learnings");
+    let mut planned_items = markdown_bullets(&existing, "## Planned");
     let mut question_items = markdown_bullets(&existing, "## Open questions");
     let mut next_items = markdown_bullets(&existing, "## Next");
     let mut added = 0;
 
-    for item in clean_bullets(done) {
+    for item in clean_bullets(sections.done) {
         if !done_items.contains(&item) {
             done_items.push(item.clone());
             added += 1;
         }
         next_items.retain(|next_item| next_item != &item);
     }
-    for item in clean_bullets(questions) {
+    for (values, items) in [
+        (sections.decisions, &mut decision_items),
+        (sections.learnings, &mut learning_items),
+        (sections.planned, &mut planned_items),
+    ] {
+        for item in clean_bullets(values) {
+            if !items.contains(&item) {
+                items.push(item);
+                added += 1;
+            }
+        }
+    }
+    for item in clean_bullets(sections.questions) {
         if !question_items.contains(&item) {
             question_items.push(item);
             added += 1;
         }
     }
-    for item in clean_bullets(next) {
+    for item in clean_bullets(sections.next) {
         if !done_items.contains(&item) && !next_items.contains(&item) {
             next_items.push(item);
             added += 1;
         }
     }
 
-    let content = render_journal(
-        date,
-        &original_created_at,
-        &done_items,
-        &question_items,
-        &next_items,
-    );
+    let rendered = JournalSections {
+        done: &done_items,
+        decisions: &decision_items,
+        learnings: &learning_items,
+        planned: &planned_items,
+        questions: &question_items,
+        next: &next_items,
+    };
+    let content = render_journal(date, &original_created_at, rendered);
     fs::write(&path, content)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(JournalUpdate { path, added })
@@ -262,22 +300,19 @@ fn markdown_bullets(text: &str, heading: &str) -> Vec<String> {
     values
 }
 
-fn render_journal(
-    date: &str,
-    created_at: &str,
-    done: &[String],
-    questions: &[String],
-    next: &[String],
-) -> String {
+fn render_journal(date: &str, created_at: &str, sections: JournalSections<'_>) -> String {
     let mut output = format!(
         "---\nid: {}\ntype: \"journal\"\ncreated_at: {}\n---\n\n# {date}\n",
         crate::util::yaml_string(&format!("journal-{date}")),
         crate::util::yaml_string(created_at),
     );
     for (heading, values) in [
-        ("Done", done),
-        ("Open questions", questions),
-        ("Next", next),
+        ("Done", sections.done),
+        ("Decisions", sections.decisions),
+        ("Learnings", sections.learnings),
+        ("Planned", sections.planned),
+        ("Open questions", sections.questions),
+        ("Next", sections.next),
     ] {
         output.push_str(&format!("\n## {heading}\n\n"));
         if values.is_empty() {
@@ -668,8 +703,8 @@ mod tests {
         let path = repo.join("exclude");
         fs::write(&path, "target/\n").unwrap();
 
-        assert!(ensure_git_excluded(&path).unwrap());
-        assert!(!ensure_git_excluded(&path).unwrap());
+        assert!(ensure_git_excluded(&path, "/.tincan/").unwrap());
+        assert!(!ensure_git_excluded(&path, "/.tincan/").unwrap());
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.starts_with("target/\n"));
@@ -695,6 +730,7 @@ mod tests {
             CONFIG
         );
         assert!(root.join("AGENT_GUIDE.md").is_file());
+        assert_eq!(fs::read_to_string(root.join("plan.md")).unwrap(), PLAN);
         for directory in DIRECTORIES {
             assert!(root.join(directory).is_dir());
         }
@@ -750,18 +786,28 @@ mod tests {
             &repo,
             "2026-08-05",
             "2026-08-05T09:00:00+02:00",
-            &[],
-            &["Should this be shared?".into()],
-            &["Implement journal".into()],
+            JournalSections {
+                done: &[],
+                decisions: &[],
+                learnings: &[],
+                planned: &[],
+                questions: &["Should this be shared?".into()],
+                next: &["Implement journal".into()],
+            },
         )
         .unwrap();
         update_journal(
             &repo,
             "2026-08-05",
             "2026-08-05T10:00:00+02:00",
-            &["Implement journal".into()],
-            &["Should this be shared?".into()],
-            &[],
+            JournalSections {
+                done: &["Implement journal".into()],
+                decisions: &["Keep Markdown canonical".into()],
+                learnings: &["Nested repositories need workspace-relative paths".into()],
+                planned: &["Add a plan".into()],
+                questions: &["Should this be shared?".into()],
+                next: &[],
+            },
         )
         .unwrap();
 
@@ -770,6 +816,11 @@ mod tests {
         assert_eq!(content.matches("- Implement journal").count(), 1);
         assert_eq!(content.matches("- Should this be shared?").count(), 1);
         assert!(content.contains("created_at: \"2026-08-05T09:00:00+02:00\""));
+        assert!(content.contains("## Decisions\n\n- Keep Markdown canonical"));
+        assert!(
+            content.contains("## Learnings\n\n- Nested repositories need workspace-relative paths")
+        );
+        assert!(content.contains("## Planned\n\n- Add a plan"));
         fs::remove_dir_all(repo).unwrap();
     }
 }

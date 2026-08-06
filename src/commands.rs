@@ -5,6 +5,7 @@ use crate::model::{DecisionStatus, Kind, Record};
 use crate::skill::{self, InstallOutcome};
 use crate::store;
 use crate::util::display_path;
+use crate::workspace;
 use chrono::{Local, SecondsFormat};
 use uuid::Uuid;
 
@@ -29,6 +30,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Summary { repo, verbose } => summary(repo, verbose),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
+        Command::Plan { repo } => plan(repo),
         Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
@@ -83,24 +85,23 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
 }
 
 fn init(path: std::path::PathBuf) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
-    git::require_tincan_untracked(&root)?;
-    let exclude = git::exclude_path(&root)?;
-    let excluded = store::ensure_git_excluded(&exclude)?;
-    git::verify_tincan_ignored(&root)?;
+    let root = workspace::target(&path)?;
+    let excluded = git::protect_workspace(&root)?;
     let tincan = store::initialize(&root)?;
     branding::print();
     println!("Initialized Tincan at {}", display_path(&tincan));
-    if excluded {
-        println!("Kept .tincan private through Git's local exclude file.");
-    } else {
-        println!(".tincan is already excluded from Git locally.");
+    match excluded {
+        Some(true) => println!("Kept .tincan private through Git's local exclude file."),
+        Some(false) => println!(".tincan is already excluded from Git locally."),
+        None => {
+            println!("This workspace is outside Git; nested repositories cannot track .tincan.")
+        }
     }
     Ok(())
 }
 
 fn summary(path: std::path::PathBuf, verbose: bool) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
+    let root = workspace::find(&path)?;
     let documents = store::scan(&root)?;
     let groups = [
         ("Decisions", "decision"),
@@ -156,8 +157,7 @@ fn record(args: RecordArgs) -> Result<(), String> {
     if args.kind != "decision" && !args.supersedes.is_empty() {
         return Err("--supersedes can only be used with a decision".to_string());
     }
-    let snapshot = git::snapshot(&args.repo)?;
-    store::require(&snapshot.root)?;
+    let root = workspace::find(&args.repo)?;
     let kind = Kind::parse(&args.kind)?;
     let id = Uuid::now_v7().to_string();
     let created_at = Local::now().to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -166,7 +166,7 @@ fn record(args: RecordArgs) -> Result<(), String> {
         Kind::Learning => None,
         Kind::Journal => unreachable!("journal entries use the journal command"),
     };
-    let superseded = store::active_decisions(&snapshot.root, &args.supersedes)?;
+    let superseded = store::active_decisions(&root, &args.supersedes)?;
     let record = Record {
         id,
         kind,
@@ -178,9 +178,9 @@ fn record(args: RecordArgs) -> Result<(), String> {
         evidence: args.evidence,
         related: args.related,
         supersedes: args.supersedes,
-        branch: snapshot.branch,
+        branch: git::branch(&args.repo)?,
     };
-    let path = store::write(&snapshot.root, kind, &record.id, &record.render())?;
+    let path = store::write(&root, kind, &record.id, &record.render())?;
     if let Err(error) = store::mark_superseded(&superseded, &record.id) {
         return match std::fs::remove_file(&path) {
             Ok(()) => Err(error),
@@ -200,19 +200,20 @@ fn record(args: RecordArgs) -> Result<(), String> {
 }
 
 fn journal(args: JournalArgs) -> Result<(), String> {
-    let root = git::repository_root(&args.repo)?;
+    let root = workspace::find(&args.repo)?;
     store::require(&root)?;
     let now = Local::now();
     let date = now.format("%Y-%m-%d").to_string();
     let created_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
-    let update = store::update_journal(
-        &root,
-        &date,
-        &created_at,
-        &args.done,
-        &args.questions,
-        &args.next,
-    )?;
+    let sections = store::JournalSections {
+        done: &args.done,
+        decisions: &args.decisions,
+        learnings: &args.learnings,
+        planned: &args.planned,
+        questions: &args.questions,
+        next: &args.next,
+    };
+    let update = store::update_journal(&root, &date, &created_at, sections)?;
     println!("Updated journal: {}", display_path(&update.path));
     if update.added == 0 {
         println!("No new bullets; exact duplicates were already present.");
@@ -223,7 +224,7 @@ fn journal(args: JournalArgs) -> Result<(), String> {
 }
 
 fn resume(path: std::path::PathBuf) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
+    let root = workspace::find(&path)?;
     let Some((journal_path, content)) = store::latest_journal(&root)? else {
         println!("No journal entries yet.");
         println!("Use `tincan journal --done <text>` as meaningful work develops.");
@@ -234,8 +235,16 @@ fn resume(path: std::path::PathBuf) -> Result<(), String> {
     Ok(())
 }
 
+fn plan(path: std::path::PathBuf) -> Result<(), String> {
+    let root = workspace::find(&path)?;
+    let (plan_path, content) = store::read_plan(&root)?;
+    println!("Plan: {}\n", display_path(&plan_path));
+    print!("{content}");
+    Ok(())
+}
+
 fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
+    let root = workspace::find(&path)?;
     let query = query.to_lowercase();
     let mut matches: Vec<_> = store::scan(&root)?
         .into_iter()
@@ -253,7 +262,7 @@ fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
 }
 
 fn show(path: std::path::PathBuf, id: &str) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
+    let root = workspace::find(&path)?;
     let document = store::scan(&root)?
         .into_iter()
         .find(|document| document.id == id)
@@ -341,8 +350,11 @@ fn matching_excerpt(document: &store::Document, query: &str) -> Option<String> {
 }
 
 fn changes(path: std::path::PathBuf) -> Result<(), String> {
-    let root = git::repository_root(&path)?;
-    let changed = git::changed_files(&root)?;
+    let root = workspace::find(&path)?;
+    let Some(changed) = git::workspace_changed_files(&root)? else {
+        println!("No Git repositories found in this Tincan workspace.");
+        return Ok(());
+    };
     if changed.is_empty() {
         println!("No changed files.");
         return Ok(());

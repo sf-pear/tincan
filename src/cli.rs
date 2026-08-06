@@ -9,6 +9,7 @@ pub enum Command {
     Summary { repo: PathBuf, verbose: bool },
     Record(RecordArgs),
     Journal(JournalArgs),
+    Plan { repo: PathBuf },
     Resume { repo: PathBuf },
     Search { repo: PathBuf, query: String },
     Show { repo: PathBuf, id: String },
@@ -20,6 +21,9 @@ pub enum Command {
 pub struct JournalArgs {
     pub repo: PathBuf,
     pub done: Vec<String>,
+    pub decisions: Vec<String>,
+    pub learnings: Vec<String>,
+    pub planned: Vec<String>,
     pub questions: Vec<String>,
     pub next: Vec<String>,
 }
@@ -51,6 +55,17 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
+        "plan" => {
+            let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["directory"])?;
+            values.ensure_at_most_one(&["directory"])?;
+            if !values.positionals.is_empty() {
+                return Err("plan does not accept positional arguments".to_string());
+            }
+            Ok(Command::Plan {
+                repo: values.directory()?,
+            })
+        }
         "resume" => {
             let values = Flags::parse(&args[1..])?;
             values.ensure_only(&["directory"])?;
@@ -114,22 +129,40 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
 
 fn parse_journal(args: &[String]) -> Result<Command, String> {
     let values = Flags::parse(args)?;
-    values.ensure_only(&["directory", "done", "question", "next"])?;
+    values.ensure_only(&[
+        "directory",
+        "done",
+        "decision",
+        "learning",
+        "planned",
+        "question",
+        "next",
+    ])?;
     values.ensure_at_most_one(&["directory"])?;
     if !values.positionals.is_empty() {
         return Err("journal does not accept positional arguments".to_string());
     }
     let done = values.many("done");
+    let decisions = values.many("decision");
+    let learnings = values.many("learning");
+    let planned = values.many("planned");
     let questions = values.many("question");
     let next = values.many("next");
-    if done.is_empty() && questions.is_empty() && next.is_empty() {
-        return Err(
-            "journal requires at least one --done, --question, or --next bullet".to_string(),
-        );
+    if done.is_empty()
+        && decisions.is_empty()
+        && learnings.is_empty()
+        && planned.is_empty()
+        && questions.is_empty()
+        && next.is_empty()
+    {
+        return Err("journal requires at least one journal bullet".to_string());
     }
     Ok(Command::Journal(JournalArgs {
         repo: values.directory()?,
         done,
+        decisions,
+        learnings,
+        planned,
         questions,
         next,
     }))
@@ -360,17 +393,18 @@ fn is_option(value: &str) -> bool {
 pub fn help() -> &'static str {
     r#"Tincan: a plain-Markdown development journal
 
-Tincan keeps a private daily journal plus durable decisions and learnings under
-the repository's .tincan/ directory. Markdown remains the source of truth.
+Tincan keeps a living plan, daily journal, durable decisions, and learnings
+under a workspace's .tincan/ directory. Markdown remains the source of truth.
 
 USAGE
   tincan <COMMAND> [OPTIONS]
 
 COMMANDS
-  init [REPOSITORY]             Initialize private .tincan/ storage
-  summary [REPOSITORY] [-v|--verbose]
+  init [DIRECTORY]              Initialize private .tincan/ storage
+  summary [DIRECTORY] [-v|--verbose]
                                 Count stored memory; optionally list headings
-  journal [OPTIONS]             Add completed work, questions, or next steps
+  plan [-d|--directory PATH]    Print the living project plan
+  journal [OPTIONS]             Update today's concise work record
   resume [-d|--directory PATH]  Print the latest daily journal
   decide STATEMENT [OPTIONS]    Create an accepted decision record
   learn STATEMENT [OPTIONS]     Create an evidence-supported learning record
@@ -383,11 +417,11 @@ COMMANDS
   help, --help                  Print this help
   version, --version            Print the installed Tincan version
 
-REPOSITORIES AND FILES
-  Commands use the current Git repository unless REPOSITORY or --directory is
-  given. -d is the short form of --directory. Tincan writes Markdown only under
-  .tincan/ and excludes it from normal Git tracking by default. You may also
-  open those Markdown files directly.
+WORKSPACES AND FILES
+  Commands use the nearest parent directory containing .tincan/config.toml.
+  A workspace may contain zero, one, or several Git repositories. -d is the
+  short form of --directory. Tincan writes only under .tincan/ and keeps it out
+  of normal Git tracking when the workspace is inside a repository.
 
 RECORD IDS
   Decisions and learnings receive stable UUID v7 IDs such as
@@ -396,6 +430,7 @@ RECORD IDS
 
 EXAMPLES
   tincan init .
+  tincan plan
   tincan journal --done "Implemented deterministic path matching"
   tincan decide "Keep Markdown canonical" --topic storage
   tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
@@ -404,7 +439,8 @@ EXAMPLES
 
 JOURNAL OPTIONS
   tincan journal [-d|--directory PATH] [--done TEXT ...]
-                 [--question TEXT ...] [--next TEXT ...]
+                 [--decision TEXT ...] [--learning TEXT ...]
+                 [--planned TEXT ...] [--question TEXT ...] [--next TEXT ...]
 
   At least one journal bullet is required. Each bullet option is repeatable.
 
@@ -422,7 +458,7 @@ RECORD OPTIONS
   tincan learn STATEMENT [OPTIONS]
 
   -d, --directory PATH
-  --file REPOSITORY_PATH         repeatable
+  --file WORKSPACE_PATH          repeatable
   --topic TEXT                   repeatable
   --evidence TEXT                repeatable
   --related UUID                 repeatable
@@ -537,6 +573,9 @@ mod tests {
             panic!("expected journal command");
         };
         assert_eq!(journal.done, vec!["Implemented search"]);
+        assert!(journal.decisions.is_empty());
+        assert!(journal.learnings.is_empty());
+        assert!(journal.planned.is_empty());
         assert_eq!(journal.questions, vec!["Should topics be normalized?"]);
         assert_eq!(journal.next, vec!["Test on another repository"]);
     }
@@ -628,7 +667,7 @@ mod tests {
     #[test]
     fn help_explains_record_ids_and_direct_markdown_access() {
         assert!(help().contains("use an ID returned by search"));
-        assert!(help().contains("open those Markdown files directly"));
+        assert!(help().contains("nearest parent directory"));
         assert!(help().contains("UUID v7 IDs"));
         assert!(help().contains("tincan decide STATEMENT"));
         assert!(!help().contains("record decision"));
