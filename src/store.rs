@@ -253,8 +253,10 @@ fn markdown_bullets(text: &str, heading: &str) -> Vec<String> {
         if in_section && line.starts_with("## ") {
             break;
         }
-        if in_section && let Some(value) = line.strip_prefix("- ") {
-            values.push(value.trim().to_string());
+        if in_section {
+            if let Some(value) = line.strip_prefix("- ") {
+                values.push(value.trim().to_string());
+            }
         }
     }
     values
@@ -449,11 +451,34 @@ pub fn active_decisions(repo: &Path, ids: &[String]) -> Result<Vec<Document>, St
 }
 
 pub fn mark_superseded(decisions: &[Document], replacement_id: &str) -> Result<(), String> {
-    for decision in decisions {
-        let text = read_document(decision)?;
-        let updated = add_supersession(&text, replacement_id)?;
-        fs::write(&decision.path, updated)
-            .map_err(|error| format!("cannot write {}: {error}", decision.path.display()))?;
+    let updates = decisions
+        .iter()
+        .map(|decision| {
+            let original = read_document(decision)?;
+            let updated = add_supersession(&original, replacement_id)?;
+            Ok((decision.path.clone(), original, updated))
+        })
+        .collect::<Result<Vec<_>, String>>()?;
+
+    let mut written: Vec<(PathBuf, String)> = Vec::new();
+    for (path, original, updated) in &updates {
+        if let Err(error) = fs::write(path, updated) {
+            let mut rollback_errors = Vec::new();
+            for (written_path, written_original) in written.into_iter().rev() {
+                if let Err(rollback_error) = fs::write(&written_path, written_original) {
+                    rollback_errors.push(format!("{}: {rollback_error}", written_path.display()));
+                }
+            }
+            let mut message = format!("cannot write {}: {error}", path.display());
+            if !rollback_errors.is_empty() {
+                message.push_str(&format!(
+                    "; rollback also failed for {}",
+                    rollback_errors.join(", ")
+                ));
+            }
+            return Err(message);
+        }
+        written.push((path.clone(), original.clone()));
     }
     Ok(())
 }

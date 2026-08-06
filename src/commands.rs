@@ -142,7 +142,15 @@ fn record(args: RecordArgs) -> Result<(), String> {
         branch: snapshot.branch,
     };
     let path = store::write(&snapshot.root, kind, &record.id, &record.render())?;
-    store::mark_superseded(&superseded, &record.id)?;
+    if let Err(error) = store::mark_superseded(&superseded, &record.id) {
+        return match std::fs::remove_file(&path) {
+            Ok(()) => Err(error),
+            Err(cleanup_error) => Err(format!(
+                "{error}; also could not remove incomplete replacement {}: {cleanup_error}",
+                path.display()
+            )),
+        };
+    }
     println!("Created {}: {}", kind.as_str(), display_path(&path));
     println!("Record ID: {}", record.id);
     println!("Add detailed context directly to the Markdown body when useful.");
