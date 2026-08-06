@@ -13,10 +13,14 @@ background service, model provider, transcript importer, or publishing system.
 ## Install and initialize
 
 ```powershell
-cargo install --path .
+cargo install tincan-cli
+tincan --version
 tincan skill install
 tincan init C:\path\to\project
 ```
+
+Installation requires Git and Rust 1.85 or newer. From a source checkout, use
+`cargo install --path .` instead.
 
 `tincan skill install --path C:\path\to\skills` installs the embedded agent
 skill into another compatible harness. Add `--force` only when intentionally
@@ -33,10 +37,13 @@ Initialization creates:
 └── AGENT_GUIDE.md
 ```
 
-Tincan adds `.tincan/` to `.git/info/exclude`, which is local to the checkout.
-The memory remains available to local agents without appearing in `git status`
-or being pushed. Initialization does not modify tracked `AGENTS.md` or
-`.gitignore` files and is safe to repeat.
+Tincan adds `/.tincan/` to `.git/info/exclude`, which is local to the checkout,
+and asks Git to verify that `.tincan/config.toml` is ignored. It refuses to
+initialize when `.tincan/` already contains tracked files. The memory remains
+available to local agents without appearing in normal `git status`, `git add`,
+or push workflows. An explicit force-add can override any Git ignore rule, so
+do not force-add private Tincan files. Initialization does not modify tracked
+`AGENTS.md` or `.gitignore` files and is safe to repeat.
 
 ## Keep a daily journal
 
@@ -161,9 +168,9 @@ Prefer a record that explains the reasoning:
 Avoid routine progress updates, conversational speculation, raw transcripts,
 credentials, private customer data, and conclusions unsupported by evidence.
 
-Tincan memory is private by default. A future reviewed export workflow may
-produce a deliberately committable document; do not force-add private `.tincan/`
-files merely to share them casually.
+Tincan memory is private by default. A future repository setting may make the
+folder deliberately committable; until that mode exists, do not force-add
+private `.tincan/` files merely to share them casually.
 
 ## Scope
 

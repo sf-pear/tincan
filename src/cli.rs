@@ -3,6 +3,7 @@ use std::path::PathBuf;
 #[derive(Debug, PartialEq)]
 pub enum Command {
     Help,
+    Version,
     Init { repo: PathBuf },
     Inspect { repo: PathBuf },
     Record(RecordArgs),
@@ -42,6 +43,7 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
 
     match command {
         "-h" | "--help" | "help" => Ok(Command::Help),
+        "-V" | "--version" | "version" => Ok(Command::Version),
         "init" => Ok(Command::Init {
             repo: positional_repo(&args[1..])?,
         }),
@@ -63,6 +65,11 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         }
         "search" => {
             let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["repo"])?;
+            values.ensure_at_most_one(&["repo"])?;
+            if values.positionals.len() > 1 {
+                return Err("search accepts exactly one query".to_string());
+            }
             let query = values
                 .positionals
                 .first()
@@ -75,6 +82,11 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         }
         "show" => {
             let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["repo"])?;
+            values.ensure_at_most_one(&["repo"])?;
+            if values.positionals.len() > 1 {
+                return Err("show accepts exactly one record ID".to_string());
+            }
             let id = values
                 .positionals
                 .first()
@@ -87,6 +99,11 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         }
         "check" => {
             let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["repo", "changed"])?;
+            values.ensure_at_most_one(&["repo", "changed"])?;
+            if !values.positionals.is_empty() {
+                return Err("check does not accept positional arguments".to_string());
+            }
             if !values.present("changed") {
                 return Err("check currently requires --changed".to_string());
             }
@@ -127,6 +144,8 @@ fn parse_skill(args: &[String]) -> Result<Command, String> {
         return Err("skill requires `install`".to_string());
     }
     let values = Flags::parse(&args[1..])?;
+    values.ensure_only(&["path", "force"])?;
+    values.ensure_at_most_one(&["path", "force"])?;
     if !values.positionals.is_empty() {
         return Err("skill install does not accept positional arguments".to_string());
     }
@@ -283,6 +302,7 @@ pub fn help() -> &'static str {
     r#"Tincan — a plain-Markdown development journal
 
 USAGE
+  tincan --version
   tincan init [REPOSITORY]
   tincan inspect [REPOSITORY]
   tincan record <decision|learning> --title TEXT --note TEXT [OPTIONS]
@@ -416,5 +436,29 @@ mod tests {
         assert_eq!(journal.done, vec!["Implemented search"]);
         assert_eq!(journal.questions, vec!["Should topics be normalized?"]);
         assert_eq!(journal.next, vec!["Test on another repository"]);
+    }
+
+    #[test]
+    fn parses_version_flags() {
+        for argument in ["-V", "--version", "version"] {
+            assert_eq!(parse(vec![argument.to_string()]).unwrap(), Command::Version);
+        }
+    }
+
+    #[test]
+    fn rejects_extra_arguments_and_unknown_options() {
+        assert_eq!(
+            parse(["search", "one", "two"].map(str::to_string).to_vec()).unwrap_err(),
+            "search accepts exactly one query"
+        );
+        assert!(
+            parse(
+                ["skill", "install", "--unknown", "value"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap_err()
+            .contains("unknown option --unknown")
+        );
     }
 }

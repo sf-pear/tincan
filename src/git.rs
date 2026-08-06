@@ -29,6 +29,51 @@ pub fn exclude_path(path: &Path) -> Result<PathBuf, String> {
     }
 }
 
+pub fn require_tincan_untracked(path: &Path) -> Result<(), String> {
+    let root = repository_root(path)?;
+    let tracked = run(&root, &["ls-files", "--", ".tincan"])?;
+    if tracked.is_empty() {
+        return Ok(());
+    }
+
+    Err(format!(
+        ".tincan already contains tracked files, so Tincan cannot guarantee private storage:\n{}\nremove them from the Git index before running `tincan init`",
+        tracked
+            .lines()
+            .map(|file| format!("  {file}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    ))
+}
+
+pub fn verify_tincan_ignored(path: &Path) -> Result<(), String> {
+    let root = repository_root(path)?;
+    let output = Command::new("git")
+        .args([
+            "check-ignore",
+            "--quiet",
+            "--no-index",
+            "--",
+            ".tincan/config.toml",
+        ])
+        .current_dir(&root)
+        .output()
+        .map_err(|error| format!("cannot run git: {error}"))?;
+
+    if output.status.success() {
+        return Ok(());
+    }
+    if output.status.code() == Some(1) {
+        return Err(
+            "Git does not ignore .tincan/config.toml; refusing to initialize memory that may be committed. Review repository ignore rules that re-include .tincan and retry."
+                .to_string(),
+        );
+    }
+
+    let message = String::from_utf8_lossy(&output.stderr);
+    Err(format!("git check-ignore failed: {}", message.trim()))
+}
+
 pub fn snapshot(path: &Path) -> Result<Snapshot, String> {
     let root = repository_root(path)?;
     Ok(Snapshot {
@@ -74,5 +119,47 @@ fn run(path: &Path, args: &[&str]) -> Result<String, String> {
     } else {
         let message = String::from_utf8_lossy(&output.stderr);
         Err(format!("git {} failed: {}", args.join(" "), message.trim()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::store;
+    use std::fs;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn private_tincan_storage_is_ignored_and_must_be_untracked() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("tincan-private-git-{unique}"));
+        fs::create_dir_all(&repo).unwrap();
+        run(&repo, &["init", "--quiet"]).unwrap();
+
+        let exclude = exclude_path(&repo).unwrap();
+        assert!(store::ensure_git_excluded(&exclude).unwrap());
+        verify_tincan_ignored(&repo).unwrap();
+        store::initialize(&repo).unwrap();
+
+        let status = run(&repo, &["status", "--short", "--untracked-files=all"]).unwrap();
+        assert!(
+            status.is_empty(),
+            "private memory appeared in status: {status}"
+        );
+
+        let repository_ignore = repo.join(".gitignore");
+        fs::write(&repository_ignore, "!/.tincan/\n!/.tincan/config.toml\n").unwrap();
+        let error = verify_tincan_ignored(&repo).unwrap_err();
+        assert!(error.contains("does not ignore"));
+        fs::remove_file(repository_ignore).unwrap();
+
+        run(&repo, &["add", "--force", ".tincan/config.toml"]).unwrap();
+        let error = require_tincan_untracked(&repo).unwrap_err();
+        assert!(error.contains(".tincan/config.toml"));
+
+        fs::remove_dir_all(repo).unwrap();
     }
 }

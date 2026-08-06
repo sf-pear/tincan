@@ -9,12 +9,17 @@ under `.tincan/` is the source of truth.
 
 See [the user guide](docs/USER_GUIDE.md) for the complete workflow.
 
-## Install during development
+## Install
+
+Tincan requires Git and Rust 1.85 or newer.
 
 ```powershell
-cargo install --path .
+cargo install tincan-cli
+tincan --version
 tincan skill install
 ```
+
+When working from a source checkout, use `cargo install --path .` instead.
 
 Install the bundled skill into another Agent Skills-compatible harness:
 
@@ -75,9 +80,12 @@ tincan record decision `
 └── AGENT_GUIDE.md
 ```
 
-Initialization adds `.tincan/` to Git's local exclude file. Tincan memory stays
-inside the checkout but does not appear in `git status` or get pushed. It does
-not modify the repository's tracked `AGENTS.md` or `.gitignore`.
+Initialization adds `/.tincan/` to Git's local exclude file and verifies the
+rule with Git. Tincan refuses to initialize if `.tincan/` already contains
+tracked files. Memory stays inside the checkout and is omitted from normal Git
+status, add, and push workflows. An explicit force-add can override any Git
+ignore rule, so do not force-add private Tincan files. Initialization does not
+modify the repository's tracked `AGENTS.md` or `.gitignore`.
 
 Tincan reads record frontmatter for search and changed-file matching, then loads
 the full Markdown only for `show`. Explicit skill installation is the only

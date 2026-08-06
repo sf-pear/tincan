@@ -4,6 +4,20 @@ version = "0.1.0"
 edition = "2024"
 description = "Capture important decisions, their reasoning, and learnings from agent coding sessions in plain Markdown"
 license = "MIT"
+repository = "https://github.com/sf-pear/tincan"
+rust-version = "1.85"
+keywords = ["cli", "developer-tools", "git", "markdown", "documentation"]
+categories = ["command-line-utilities", "development-tools"]
+include = [
+    "/src/**",
+    "/skills/tincan/**",
+    "/docs/**",
+    "/Cargo.toml",
+    "/Cargo.lock",
+    "/README.md",
+    "/CHANGELOG.md",
+    "/LICENSE",
+]
 
 [dependencies]
 chrono = { version = "0.4.45", default-features = false, features = ["clock"] }

@@ -13,6 +13,10 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
             print!("{}", cli::help());
             Ok(())
         }
+        Command::Version => {
+            println!("tincan {}", env!("CARGO_PKG_VERSION"));
+            Ok(())
+        }
         Command::Init { repo } => init(repo),
         Command::Inspect { repo } => inspect(repo),
         Command::Record(args) => record(args),
@@ -40,8 +44,10 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
 
 fn init(path: std::path::PathBuf) -> Result<(), String> {
     let root = git::repository_root(&path)?;
+    git::require_tincan_untracked(&root)?;
     let exclude = git::exclude_path(&root)?;
     let excluded = store::ensure_git_excluded(&exclude)?;
+    git::verify_tincan_ignored(&root)?;
     let tincan = store::initialize(&root)?;
     println!("Initialized Tincan at {}", display_path(&tincan));
     if excluded {

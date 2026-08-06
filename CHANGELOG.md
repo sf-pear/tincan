@@ -6,10 +6,13 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-08-06
+
 ### Added
 
 - Initialize portable `.tincan/` ledgers in any Git repository.
-- Keep `.tincan/` private by default through Git's local exclude file without
+- Keep `.tincan/` private by default through verified Git-local exclusion,
+  refuse initialization when the folder already has tracked files, and avoid
   modifying tracked project files.
 - Maintain one living daily journal for completed work, open questions, and next
   steps, and resume from the latest entry.

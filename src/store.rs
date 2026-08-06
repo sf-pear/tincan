@@ -99,7 +99,7 @@ pub fn ensure_git_excluded(path: &Path) -> Result<bool, String> {
     if !updated.is_empty() && !updated.ends_with('\n') {
         updated.push('\n');
     }
-    updated.push_str(".tincan/\n");
+    updated.push_str("/.tincan/\n");
     fs::write(path, updated)
         .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
     Ok(true)
@@ -552,6 +552,7 @@ mod tests {
 
         let content = fs::read_to_string(path).unwrap();
         assert!(content.starts_with("target/\n"));
+        assert!(content.contains("/.tincan/\n"));
         assert_eq!(content.matches(".tincan/").count(), 1);
         fs::remove_dir_all(repo).unwrap();
     }
