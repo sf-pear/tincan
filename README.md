@@ -21,6 +21,15 @@ Tincan keeps a small record of what matters:
 - **Decision:** an accepted choice that should guide future work.
 - **Learning:** an evidence-supported conclusion worth remembering.
 
+Tincan is designed to be maintained by the coding agent as work happens. With
+the bundled skill installed, the agent records meaningful progress, accepted
+decisions, useful learnings, open questions, and the next place to start. You
+can run the same commands yourself whenever you want.
+
+Nothing runs in the background or records everything automatically. The agent
+uses Tincan deliberately to keep the small amount of context worth carrying
+forward.
+
 Everything is stored as plain Markdown inside the project. There is no database,
 background service, graph, or attempt to record every action. Just a simple way
 to stay sane given the sheer velocity of development and the amount of decisions
