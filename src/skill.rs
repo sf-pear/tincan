@@ -8,6 +8,7 @@ use crate::util::display_path;
 
 const SKILL: &str = include_str!("../skills/tincan/SKILL.md");
 const INSTALL_CONFIRM_DEFAULT: bool = true;
+const UPDATE_NOTICE: &str = "Agent Skill update available. Run `tincan skill install` to update.";
 const OPENAI_METADATA: &str = include_str!("../skills/tincan/agents/openai.yaml");
 const PICKER_HELP: &str =
     "[↑↓ move, Space select/unselect, A toggle all/none, Enter continue, Esc cancel]";
@@ -32,51 +33,15 @@ pub fn detect_roots() -> Vec<SkillRoot> {
     detect_roots_from(home.as_deref(), codex_home.as_deref())
 }
 
-pub fn offer_updates() -> Result<(), String> {
+pub fn notify_if_update_available() {
     if !io::stderr().is_terminal() {
-        return Ok(());
+        return;
     }
     let roots = detect_roots();
-    let outdated = outdated_roots(&roots);
-    if outdated.is_empty() {
-        return Ok(());
+    if outdated_roots(&roots).is_empty() {
+        return;
     }
-    eprintln!("Tincan Agent Skill update available.");
-    eprintln!();
-    eprintln!("The following installations can be updated:");
-    for root in &outdated {
-        eprintln!(
-            "  - {}: {}",
-            root.name,
-            display_user_path(&root.path.join("tincan"))
-        );
-    }
-    eprintln!();
-    let confirmed = Confirm::with_theme(&ColorfulTheme::default())
-        .with_prompt("Update them now?")
-        .default(false)
-        .wait_for_newline(true)
-        .interact()
-        .map_err(|error| format!("cannot read skill update confirmation: {error}"))?;
-    if !confirmed {
-        return Ok(());
-    }
-    let paths: Vec<_> = outdated.iter().map(|root| root.path.clone()).collect();
-    for outcome in install_many(&paths, true)? {
-        match outcome {
-            InstallOutcome::Installed(path) => {
-                eprintln!("Updated Tincan skill at {}", display_user_path(&path));
-            }
-            InstallOutcome::AlreadyCurrent(path) => {
-                eprintln!(
-                    "Tincan skill is already current at {}",
-                    display_user_path(&path)
-                );
-            }
-        }
-    }
-    eprintln!("Restart or reload the agent harness to discover the update.\n");
-    Ok(())
+    eprintln!("{UPDATE_NOTICE}");
 }
 
 fn outdated_roots(roots: &[SkillRoot]) -> Vec<&SkillRoot> {
@@ -395,6 +360,14 @@ mod tests {
     }
 
     #[test]
+    fn skill_update_notice_is_concise_and_actionable() {
+        assert_eq!(
+            UPDATE_NOTICE,
+            "Agent Skill update available. Run `tincan skill install` to update."
+        );
+    }
+
+    #[test]
     fn picker_help_explains_every_available_action() {
         for instruction in [
             "↑↓ move",
@@ -422,6 +395,20 @@ mod tests {
         assert!(SKILL.contains("Not now"));
         assert!(SKILL.contains("Never run"));
         assert!(SKILL.contains("without the user's explicit confirmation"));
+    }
+
+    #[test]
+    fn bundled_skill_contains_the_complete_memory_policy() {
+        for instruction in [
+            "transient status only",
+            "maintaining project memory",
+            "no durable implication",
+            "mistake, regression, or repeated",
+            "promote a journal status update into a learning",
+        ] {
+            assert!(SKILL.contains(instruction));
+        }
+        assert!(!SKILL.contains("AGENT_GUIDE.md"));
     }
 
     #[test]

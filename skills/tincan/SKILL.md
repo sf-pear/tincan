@@ -16,9 +16,8 @@ workspace may contain zero, one, or several Git repositories.
    exists, offer to run `tincan init <directory>` through the harness's standard
    user-question tool with `Initialize Tincan` and `Not now` choices. Never run
    `tincan init` without the user's explicit confirmation.
-3. Read `.tincan/AGENT_GUIDE.md`.
-4. Run `tincan plan`, then `tincan resume`.
-5. Run `tincan changes` when existing file-linked memory may matter. Search
+3. Run `tincan plan`, then `tincan resume`.
+4. Run `tincan changes` when existing file-linked memory may matter. Search
    focused terms with `tincan search`, and load relevant records with `show`.
 
 ## Maintain the plan
@@ -30,15 +29,23 @@ Remove completed items because the journal preserves their history.
 ## Classify memory
 
 - Journal bullets summarize meaningful completed work, decisions, learnings,
-  planned work, open questions, and the concrete next starting point.
+  planned work, open questions, and the concrete next starting point. Include
+  transient status only when it materially explains progress, a blocker, an
+  open question, or where work should resume.
 - `tincan decide <statement>` records an accepted choice that constrains future
   work. Use `--supersedes <uuid>` when replacing an active decision.
-- `tincan learn <statement>` records a conclusion supported by evidence and
-  useful beyond the current session.
+- `tincan learn <statement>` records an evidence-supported conclusion that
+  remains useful beyond the current session. It must change a future
+  implementation, debugging, review, or architectural action: what concrete
+  mistake, regression, or repeated investigation will it prevent?
 
 Use workspace-relative `--file` paths. Let Tincan create UUIDs and frontmatter,
-then add useful detail below the generated H1. Do not record routine edits,
-speculation, raw transcripts, credentials, or customer data.
+then add useful detail below the generated H1. Do not record using Tincan,
+maintaining project memory, routine command execution, routine verification with
+no durable implication, or transient dependency and audit status. Do not
+promote a journal status update into a learning unless it establishes a durable,
+reusable conclusion. Do not record routine edits, speculation, raw transcripts,
+credentials, or customer data.
 
 ## Wrap up
 

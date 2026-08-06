@@ -11,7 +11,15 @@ repositories.
 - **Decision:** an accepted choice that constrains future work.
 - **Learning:** a durable conclusion supported by evidence.
 
-The journal preserves history. The plan reflects the current direction.
+The journal preserves meaningful project history and handoff context. Transient
+status belongs there only when it explains progress, a blocker, an open
+question, or where work should resume. The plan reflects the current direction.
+
+A learning must remain useful beyond the current session and change a future
+implementation, debugging, review, or architectural action. It should prevent a
+concrete mistake, regression, or repeated investigation. Tool usage, memory
+maintenance, routine verification with no durable implication, and transient
+dependency or audit status are not learnings.
 
 ## Setup
 

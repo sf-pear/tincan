@@ -3,42 +3,6 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-const AGENT_GUIDE: &str = r#"# Tincan Agent Guide
-
-Tincan is this workspace's private development memory. The workspace may contain
-zero, one, or several Git repositories. Markdown under `.tincan/` is canonical.
-
-## Start work
-
-1. Run `tincan plan` to read the living outcome-level direction.
-2. Run `tincan resume` to read the latest daily journal.
-3. Run `tincan changes` when file-linked history may matter.
-4. Use focused `search` queries and `show` only for relevant full records.
-
-## Maintain memory
-
-- Edit `.tincan/plan.md` directly. Keep current outcomes and ideas, not an
-  implementation checklist. Remove completed items; the journal keeps history.
-- Use short journal bullets for done, decisions, learnings, planned work, open
-  questions, and the next starting point.
-- Run `tincan decide <statement>` only for an accepted choice that constrains
-  future work. Use `--supersedes <uuid>` when replacing an active decision.
-- Run `tincan learn <statement>` only for an evidence-supported conclusion that
-  remains useful beyond the current session.
-- Use workspace-relative `--file` paths. Let Tincan create UUIDs and frontmatter,
-  then add useful detail below the H1.
-
-## Wrap up
-
-When asked to wrap up, finish for today, record learnings, or prepare for
-tomorrow, reconcile the conversation, plan, journal, decisions, and learnings.
-Update the plan, write concise journal bullets, then run `tincan resume` so the
-user can review the finalized journal. Distinguish implemented work from work
-that was only decided or planned.
-
-Do not store credentials, customer data, or raw transcripts.
-"#;
-
 const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
 const CONFIG: &str = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
 const PLAN: &str = "# Plan\n\n## Planned\n\n<!-- none -->\n\n## Ideas\n\n<!-- none -->\n";
@@ -72,11 +36,6 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
             .map_err(|error| format!("cannot write {}: {error}", config.display()))?;
     } else {
         validate_config(&config)?;
-    }
-    let guide = root.join("AGENT_GUIDE.md");
-    if !guide.exists() {
-        fs::write(&guide, AGENT_GUIDE)
-            .map_err(|error| format!("cannot write {}: {error}", guide.display()))?;
     }
     let plan = root.join("plan.md");
     if !plan.exists() {
@@ -729,7 +688,7 @@ mod tests {
             fs::read_to_string(root.join("config.toml")).unwrap(),
             CONFIG
         );
-        assert!(root.join("AGENT_GUIDE.md").is_file());
+        assert!(!root.join("AGENT_GUIDE.md").exists());
         assert_eq!(fs::read_to_string(root.join("plan.md")).unwrap(), PLAN);
         for directory in DIRECTORIES {
             assert!(root.join(directory).is_dir());

@@ -6,6 +6,18 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.3.2] - 2026-08-06
+
+### Changed
+
+- Keep the complete agent workflow and memory-classification policy in the
+  bundled skill, and stop generating or loading `.tincan/AGENT_GUIDE.md` to
+  avoid duplicated instructions and policy drift. Existing guides are left
+  untouched but are no longer needed.
+- Replace the automatic pre-command skill-update prompt with a concise notice
+  after successful interactive commands. Suppress the notice for `skill
+  install`, which already performs the requested update flow.
+
 ## [0.3.1] - 2026-08-06
 
 ### Fixed

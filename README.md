@@ -79,8 +79,7 @@ contain zero, one, or several Git repositories. Pass `-d <path>` or
 |-- plan.md
 |-- decisions/
 |-- learnings/
-|-- journal/
-`-- AGENT_GUIDE.md
+`-- journal/
 ```
 
 When the workspace is inside Git, Tincan excludes `.tincan/` through Git's

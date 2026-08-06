@@ -11,12 +11,8 @@ use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
     let command = command?;
-    if !matches!(command, Command::SkillInstall { .. }) {
-        if let Err(error) = skill::offer_updates() {
-            eprintln!("tincan: could not update installed Agent Skills: {error}");
-        }
-    }
-    match command {
+    let notify_about_skill_update = !matches!(command, Command::SkillInstall { .. });
+    let result = match command {
         Command::Help => {
             branding::print();
             print!("{}", cli::help());
@@ -36,7 +32,11 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Show { repo, id } => show(repo, &id),
         Command::Changes { repo } => changes(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
+    };
+    if result.is_ok() && notify_about_skill_update {
+        skill::notify_if_update_available();
     }
+    result
 }
 
 fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), String> {
