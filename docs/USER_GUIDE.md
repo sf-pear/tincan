@@ -39,7 +39,7 @@ repository's local exclude file.
 | `learn STATEMENT` | Record an evidence-supported learning. |
 | `search QUERY` | Search headings, metadata, and Markdown bodies. |
 | `show UUID` | Print one decision or learning. |
-| `summary [PATH]` | Summarize the repository and stored records. |
+| `summary [PATH]` | Count decisions, learnings, and journal entries. Add `--verbose` to list their headings. |
 | `check` | Find records related to changed files. |
 | `skill install` | Install the bundled agent skill. |
 

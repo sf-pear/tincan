@@ -6,7 +6,6 @@ use crate::skill::{self, InstallOutcome};
 use crate::store;
 use crate::util::display_path;
 use chrono::{Local, SecondsFormat};
-use std::collections::BTreeMap;
 use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
@@ -21,7 +20,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
             Ok(())
         }
         Command::Init { repo } => init(repo),
-        Command::Summary { repo } => summary(repo),
+        Command::Summary { repo, verbose } => summary(repo, verbose),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Resume { repo } => resume(repo),
@@ -88,29 +87,57 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn summary(path: std::path::PathBuf) -> Result<(), String> {
-    let snapshot = git::snapshot(&path)?;
-    let documents = store::scan(&snapshot.root)?;
-    let mut counts = BTreeMap::new();
-    for document in &documents {
-        *counts.entry(document.kind.as_str()).or_insert(0usize) += 1;
+fn summary(path: std::path::PathBuf, verbose: bool) -> Result<(), String> {
+    let root = git::repository_root(&path)?;
+    let documents = store::scan(&root)?;
+    let groups = [
+        ("Decisions", "decision"),
+        ("Learnings", "learning"),
+        ("Journals", "journal"),
+    ];
+    for (label, kind) in groups {
+        print_summary_count(label, kind, &documents);
     }
-
-    println!("Repository: {}", display_path(&snapshot.root));
-    println!(
-        "Branch: {}",
-        if snapshot.branch.is_empty() {
-            "(detached)"
-        } else {
-            &snapshot.branch
+    if verbose {
+        for (label, kind) in groups {
+            print_summary_details(label, kind, &root, &documents);
         }
-    );
-    println!("Changed files: {}", snapshot.changed_files.len());
-    println!("Records: {}", documents.len());
-    for (kind, count) in counts {
-        println!("  {kind}: {count}");
     }
     Ok(())
+}
+
+fn print_summary_count(label: &str, kind: &str, documents: &[store::Document]) {
+    let count = documents
+        .iter()
+        .filter(|document| document.kind == kind)
+        .count();
+    let padded_label = format!("{label:<9}");
+    println!("{} {count}", branding::section(&padded_label));
+}
+
+fn print_summary_details(
+    label: &str,
+    kind: &str,
+    root: &std::path::Path,
+    documents: &[store::Document],
+) {
+    let matching: Vec<_> = documents
+        .iter()
+        .filter(|document| document.kind == kind)
+        .collect();
+    if matching.is_empty() {
+        return;
+    }
+    println!();
+    println!("{}", branding::section(label));
+    for document in matching {
+        let relative = document.path.strip_prefix(root).unwrap_or(&document.path);
+        println!(
+            "  {}  {}",
+            branding::heading(&document.heading),
+            branding::path(&display_path(relative))
+        );
+    }
 }
 
 fn record(args: RecordArgs) -> Result<(), String> {

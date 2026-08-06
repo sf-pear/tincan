@@ -6,7 +6,7 @@ pub enum Command {
     Help,
     Version,
     Init { repo: PathBuf },
-    Summary { repo: PathBuf },
+    Summary { repo: PathBuf, verbose: bool },
     Record(RecordArgs),
     Journal(JournalArgs),
     Resume { repo: PathBuf },
@@ -47,9 +47,7 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "init" => Ok(Command::Init {
             repo: positional_repo(&args[1..])?,
         }),
-        "summary" => Ok(Command::Summary {
-            repo: positional_repo(&args[1..])?,
-        }),
+        "summary" => parse_summary(&args[1..]),
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
@@ -135,6 +133,24 @@ fn parse_journal(args: &[String]) -> Result<Command, String> {
         questions,
         next,
     }))
+}
+
+fn parse_summary(args: &[String]) -> Result<Command, String> {
+    let values = Flags::parse(args)?;
+    values.ensure_only(&["verbose"])?;
+    values.ensure_at_most_one(&["verbose"])?;
+    if values.positionals.len() > 1 {
+        return Err("summary accepts at most one repository path".to_string());
+    }
+    Ok(Command::Summary {
+        repo: values
+            .positionals
+            .first()
+            .map(PathBuf::from)
+            .map(Ok)
+            .unwrap_or_else(|| std::env::current_dir().map_err(|error| error.to_string()))?,
+        verbose: values.present("verbose"),
+    })
 }
 
 fn parse_skill(args: &[String]) -> Result<Command, String> {
@@ -240,7 +256,7 @@ impl Flags {
                 if name.is_empty() {
                     return Err("empty flag".to_string());
                 }
-                if matches!(name, "changed" | "force") {
+                if matches!(name, "changed" | "force" | "verbose") {
                     parsed.values.push((name.to_string(), None));
                     index += 1;
                     continue;
@@ -253,6 +269,11 @@ impl Flags {
                 parsed.values.push((name.to_string(), Some(next)));
                 index += 2;
             } else if let Some(name) = short_option_name(value) {
+                if name == "verbose" {
+                    parsed.values.push((name.to_string(), None));
+                    index += 1;
+                    continue;
+                }
                 let next = args
                     .get(index + 1)
                     .filter(|candidate| !is_option(candidate))
@@ -327,6 +348,7 @@ impl Flags {
 fn short_option_name(value: &str) -> Option<&'static str> {
     match value {
         "-d" => Some("directory"),
+        "-v" => Some("verbose"),
         _ => None,
     }
 }
@@ -346,7 +368,8 @@ USAGE
 
 COMMANDS
   init [REPOSITORY]             Initialize private .tincan/ storage
-  summary [REPOSITORY]          Summarize the repository and stored records
+  summary [REPOSITORY] [-v|--verbose]
+                                Count stored memory; optionally list headings
   journal [OPTIONS]             Add completed work, questions, or next steps
   resume [-d|--directory PATH]  Print the latest daily journal
   decide STATEMENT [OPTIONS]    Create an accepted decision record
@@ -522,7 +545,20 @@ mod tests {
     fn parses_summary_without_an_inspect_alias() {
         assert!(matches!(
             parse(vec!["summary".to_string()]).unwrap(),
-            Command::Summary { .. }
+            Command::Summary { verbose: false, .. }
+        ));
+        assert!(matches!(
+            parse(["summary", "-v"].map(str::to_string).to_vec()).unwrap(),
+            Command::Summary { verbose: true, .. }
+        ));
+        assert!(matches!(
+            parse(
+                ["summary", "project", "--verbose"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::Summary { repo, verbose: true } if repo == std::path::Path::new("project")
         ));
         assert!(parse(vec!["inspect".to_string()]).is_err());
     }

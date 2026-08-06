@@ -6,7 +6,6 @@ use std::process::Command;
 pub struct Snapshot {
     pub root: PathBuf,
     pub branch: String,
-    pub changed_files: Vec<String>,
 }
 
 pub fn repository_root(path: &Path) -> Result<PathBuf, String> {
@@ -80,7 +79,6 @@ pub fn snapshot(path: &Path) -> Result<Snapshot, String> {
         branch: run(&root, &["branch", "--show-current"])?
             .trim()
             .to_string(),
-        changed_files: changed_files(&root)?,
         root,
     })
 }
