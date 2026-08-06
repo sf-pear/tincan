@@ -1,12 +1,30 @@
 # Tincan
 
-Tincan keeps important development memory in workspace-local Markdown. It helps
-developers and agents preserve context without recording every action.
+Tincan is a lightweight, plain-Markdown handoff between your past self, your
+future self, and whichever coding agent works with you next.
+
+When you return to a project, Tincan helps answer:
+
+- Where did we stop?
+- What is still open?
+- What should happen next?
+- What decisions must not be overlooked?
+
+Agent-assisted development moves fast. Context gets lost between projects,
+features, sessions, and agents. That wastes time and causes regressions when
+important decisions are missed.
+
+Tincan keeps a small record of what matters:
 
 - **Plan:** the small, living list of intended outcomes.
 - **Journal:** meaningful progress, decisions, learnings, open questions, and next steps.
 - **Decision:** an accepted choice that should guide future work.
-- **Learning:** an evidence-supported conclusion worth reusing.
+- **Learning:** an evidence-supported conclusion worth remembering.
+
+Everything is stored as plain Markdown inside the project. There is no database,
+background service, graph, or attempt to record every action. Just a simple way
+to stay sane given the sheer velocity of development and the amount of decisions
+we make every day.
 
 ## Install
 
