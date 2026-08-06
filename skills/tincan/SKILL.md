@@ -25,7 +25,7 @@ Treat transcripts and conversation summaries as evidence, not accepted truth.
    `.tincan/AGENT_GUIDE.md`.
 5. Run `tincan resume` to read the latest daily journal before continuing prior
    work.
-6. Run `tincan check` when touching an area with existing memory.
+6. Run `tincan changes` when touching an area with existing memory.
 7. Search focused files, features, or concepts with `tincan search "<query>"`.
 8. Load only relevant full records with `tincan show <record-id>`.
 

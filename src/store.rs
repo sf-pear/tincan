@@ -11,7 +11,7 @@ is canonical and locally excluded from Git by default.
 ## Resume work
 
 1. Run `tincan resume` to read the latest daily journal.
-2. Run `tincan check` when touching existing work.
+2. Run `tincan changes` when touching existing work.
 3. Search focused terms with `tincan search "<file, feature, or concept>"`.
 4. Use `tincan show <record-id>` only for relevant full records.
 

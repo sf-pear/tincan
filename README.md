@@ -23,6 +23,9 @@ location and `--force` to update an existing installation.
 
 From a source checkout, use `cargo install --path .`.
 
+After updating the CLI, the next interactive Tincan command offers to update
+installed skills that differ from the newly bundled version.
+
 ## Quick start
 
 ```powershell
@@ -43,7 +46,7 @@ tincan resume
 tincan search "gallery"
 tincan show 019c4ea8-7e42-7b31-a211-8df9357d747c
 tincan summary
-tincan check
+tincan changes
 ```
 
 Commands use the current directory by default. Pass `-d <path>` or

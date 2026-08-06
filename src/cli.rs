@@ -12,7 +12,7 @@ pub enum Command {
     Resume { repo: PathBuf },
     Search { repo: PathBuf, query: String },
     Show { repo: PathBuf, id: String },
-    Check { repo: PathBuf },
+    Changes { repo: PathBuf },
     SkillInstall { path: Option<PathBuf>, force: bool },
 }
 
@@ -96,14 +96,14 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
                 id,
             })
         }
-        "check" => {
+        "changes" => {
             let values = Flags::parse(&args[1..])?;
             values.ensure_only(&["directory"])?;
             values.ensure_at_most_one(&["directory"])?;
             if !values.positionals.is_empty() {
-                return Err("check does not accept positional arguments".to_string());
+                return Err("changes does not accept positional arguments".to_string());
             }
-            Ok(Command::Check {
+            Ok(Command::Changes {
                 repo: values.directory()?,
             })
         }
@@ -378,7 +378,7 @@ COMMANDS
                                 List matching records and their IDs
   show [-d|--directory PATH] RECORD_ID
                                 Print one record; use an ID returned by search
-  check [-d|--directory PATH]   Find records related to Git-changed paths
+  changes [-d|--directory PATH] Show memory related to Git-changed paths
   skill install [OPTIONS]       Install the bundled Agent Skill
   help, --help                  Print this help
   version, --version            Print the installed Tincan version
@@ -613,13 +613,13 @@ mod tests {
             .contains("unknown option --unknown")
         );
         assert_eq!(
-            parse(vec!["check".to_string()]).unwrap(),
-            Command::Check {
+            parse(vec!["changes".to_string()]).unwrap(),
+            Command::Changes {
                 repo: std::env::current_dir().unwrap(),
             }
         );
         assert!(
-            parse(["check", "--changed"].map(str::to_string).to_vec())
+            parse(["changes", "--changed"].map(str::to_string).to_vec())
                 .unwrap_err()
                 .contains("unknown option --changed")
         );

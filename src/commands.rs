@@ -9,7 +9,13 @@ use chrono::{Local, SecondsFormat};
 use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
-    match command? {
+    let command = command?;
+    if !matches!(command, Command::SkillInstall { .. }) {
+        if let Err(error) = skill::offer_updates() {
+            eprintln!("tincan: could not update installed Agent Skills: {error}");
+        }
+    }
+    match command {
         Command::Help => {
             branding::print();
             print!("{}", cli::help());
@@ -26,7 +32,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
-        Command::Check { repo } => check(repo),
+        Command::Changes { repo } => changes(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
     }
 }
@@ -57,10 +63,16 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
         match outcome {
             InstallOutcome::Installed(path) => {
                 installed = true;
-                println!("Installed Tincan skill at {}", display_path(&path));
+                println!(
+                    "Installed Tincan skill at {}",
+                    skill::display_user_path(&path)
+                );
             }
             InstallOutcome::AlreadyCurrent(path) => {
-                println!("Tincan skill is already current at {}", display_path(&path));
+                println!(
+                    "Tincan skill is already current at {}",
+                    skill::display_user_path(&path)
+                );
             }
         }
     }
@@ -328,7 +340,7 @@ fn matching_excerpt(document: &store::Document, query: &str) -> Option<String> {
     })
 }
 
-fn check(path: std::path::PathBuf) -> Result<(), String> {
+fn changes(path: std::path::PathBuf) -> Result<(), String> {
     let root = git::repository_root(&path)?;
     let changed = git::changed_files(&root)?;
     if changed.is_empty() {
@@ -336,47 +348,35 @@ fn check(path: std::path::PathBuf) -> Result<(), String> {
         return Ok(());
     }
 
-    println!("Changed files:");
+    let documents = store::scan(&root)?;
     for file in &changed {
-        println!("  {file}");
-    }
-
-    let mut related = Vec::new();
-    for document in store::scan(&root)? {
-        let matched: Vec<_> = document
-            .files
+        let related: Vec<_> = documents
             .iter()
-            .filter(|affected| {
-                changed
+            .filter(|document| {
+                document
+                    .files
                     .iter()
-                    .any(|file| paths_overlap(file, affected.as_str()))
+                    .any(|affected| paths_overlap(file, affected))
             })
-            .cloned()
             .collect();
-        if !matched.is_empty() {
-            related.push((document, matched));
+        if related.is_empty() {
+            println!(
+                "{}  {}",
+                branding::section(file),
+                branding::path("no records")
+            );
+            continue;
         }
-    }
-
-    if related.is_empty() {
-        println!("\nNo path-related Tincan history found.");
-        return Ok(());
-    }
-
-    println!("\nRelated Tincan history:");
-    for (document, matched) in related {
-        let label = document
-            .status
-            .as_deref()
-            .map(|status| format!("{} / {status}", document.kind))
-            .unwrap_or_else(|| document.kind.clone());
-        println!(
-            "  {} [{}]\n    matched: {}\n    {}",
-            document.heading,
-            label,
-            matched.join(", "),
-            display_path(&document.path)
-        );
+        for (index, document) in related.into_iter().enumerate() {
+            let relative = document.path.strip_prefix(&root).unwrap_or(&document.path);
+            let file_label = if index == 0 { file.as_str() } else { "" };
+            println!(
+                "{file_label}  {}: {}  {}",
+                document.kind,
+                branding::heading(&document.heading),
+                branding::path(&display_path(relative))
+            );
+        }
     }
     Ok(())
 }

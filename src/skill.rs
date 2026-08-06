@@ -1,7 +1,10 @@
 use dialoguer::{Confirm, MultiSelect, theme::ColorfulTheme};
 use std::collections::BTreeSet;
 use std::fs;
+use std::io::{self, IsTerminal};
 use std::path::{Path, PathBuf};
+
+use crate::util::display_path;
 
 const SKILL: &str = include_str!("../skills/tincan/SKILL.md");
 const OPENAI_METADATA: &str = include_str!("../skills/tincan/agents/openai.yaml");
@@ -28,16 +31,77 @@ pub fn detect_roots() -> Vec<SkillRoot> {
     detect_roots_from(home.as_deref(), codex_home.as_deref())
 }
 
+pub fn offer_updates() -> Result<(), String> {
+    if !io::stderr().is_terminal() {
+        return Ok(());
+    }
+    let roots = detect_roots();
+    let outdated = outdated_roots(&roots);
+    if outdated.is_empty() {
+        return Ok(());
+    }
+    eprintln!("Tincan Agent Skill update available.");
+    eprintln!();
+    eprintln!("The following installations can be updated:");
+    for root in &outdated {
+        eprintln!(
+            "  - {}: {}",
+            root.name,
+            display_user_path(&root.path.join("tincan"))
+        );
+    }
+    eprintln!();
+    let confirmed = Confirm::with_theme(&ColorfulTheme::default())
+        .with_prompt("Update them now?")
+        .default(false)
+        .wait_for_newline(true)
+        .interact()
+        .map_err(|error| format!("cannot read skill update confirmation: {error}"))?;
+    if !confirmed {
+        return Ok(());
+    }
+    let paths: Vec<_> = outdated.iter().map(|root| root.path.clone()).collect();
+    for outcome in install_many(&paths, true)? {
+        match outcome {
+            InstallOutcome::Installed(path) => {
+                eprintln!("Updated Tincan skill at {}", display_user_path(&path));
+            }
+            InstallOutcome::AlreadyCurrent(path) => {
+                eprintln!(
+                    "Tincan skill is already current at {}",
+                    display_user_path(&path)
+                );
+            }
+        }
+    }
+    eprintln!("Restart or reload the agent harness to discover the update.\n");
+    Ok(())
+}
+
+fn outdated_roots(roots: &[SkillRoot]) -> Vec<&SkillRoot> {
+    roots
+        .iter()
+        .filter(|root| {
+            let destination = root.path.join("tincan");
+            let skill = destination.join("SKILL.md");
+            let metadata = destination.join("agents").join("openai.yaml");
+            destination.is_dir()
+                && (read(&skill).ok().as_deref() != Some(SKILL)
+                    || read(&metadata).ok().as_deref() != Some(OPENAI_METADATA))
+        })
+        .collect()
+}
+
 pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>, String> {
-    let labels = selection_labels(roots);
+    let labels = picker_labels(roots);
     let defaults = default_selections(roots);
-    let prompt = format!("Select user-wide Agent Skills destinations\n{PICKER_HELP}");
     let theme = ColorfulTheme::default();
     loop {
         let Some(indices) = MultiSelect::with_theme(&theme)
-            .with_prompt(&prompt)
+            .with_prompt("Select user-wide Agent Skills destinations")
             .items(&labels)
             .defaults(&defaults)
+            .report(false)
             .interact_opt()
             .map_err(|error| format!("cannot read skill destination selection: {error}"))?
         else {
@@ -47,6 +111,13 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
         if selected.is_empty() {
             eprintln!("No destinations selected. Select at least one or press Escape to cancel.");
             continue;
+        }
+        println!("✔ Select user-wide Agent Skills destinations");
+        println!("The Tincan skill will be installed in:");
+        for index in &indices {
+            if let Some(root) = roots.get(*index) {
+                println!("  - {}: {}", root.name, display_user_path(&root.path));
+            }
         }
         let confirmed = Confirm::with_theme(&theme)
             .with_prompt(format!(
@@ -192,6 +263,31 @@ fn selection_labels(roots: &[SkillRoot]) -> Vec<String> {
         .collect()
 }
 
+fn picker_labels(roots: &[SkillRoot]) -> Vec<String> {
+    let mut labels = selection_labels(roots);
+    if let Some(last) = labels.last_mut() {
+        last.push_str("\n\n");
+        last.push_str(PICKER_HELP);
+    }
+    labels
+}
+
+pub fn display_user_path(path: &Path) -> String {
+    let home = nonempty_env("USERPROFILE")
+        .or_else(|| nonempty_env("HOME"))
+        .map(PathBuf::from);
+    if let Some(relative) = home
+        .as_deref()
+        .and_then(|home| path.strip_prefix(home).ok())
+    {
+        if relative.as_os_str().is_empty() {
+            return "~".to_string();
+        }
+        return format!("~/{}", display_path(relative));
+    }
+    display_path(path)
+}
+
 fn default_selections(roots: &[SkillRoot]) -> Vec<bool> {
     vec![true; roots.len()]
 }
@@ -303,6 +399,13 @@ mod tests {
         ] {
             assert!(PICKER_HELP.contains(instruction));
         }
+        let roots = vec![SkillRoot {
+            name: "Only harness".to_string(),
+            path: PathBuf::from("only/skills"),
+        }];
+        let labels = picker_labels(&roots);
+        assert!(labels[0].ends_with(PICKER_HELP));
+        assert_eq!(labels[0].matches(PICKER_HELP).count(), 1);
     }
 
     #[test]
@@ -328,6 +431,34 @@ mod tests {
 
         assert!(install_many(&[first.clone(), second], false).is_err());
         assert!(!first.join("tincan").exists());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn detects_outdated_installed_skills_without_treating_missing_skills_as_updates() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tincan-skill-update-{unique}"));
+        let installed = root.join("installed");
+        let missing = root.join("missing");
+        fs::create_dir_all(installed.join("tincan")).unwrap();
+        fs::write(installed.join("tincan").join("SKILL.md"), "older skill").unwrap();
+        let roots = vec![
+            SkillRoot {
+                name: "Installed".to_string(),
+                path: installed,
+            },
+            SkillRoot {
+                name: "Missing".to_string(),
+                path: missing,
+            },
+        ];
+
+        let outdated = outdated_roots(&roots);
+        assert_eq!(outdated.len(), 1);
+        assert_eq!(outdated[0].name, "Installed");
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -25,23 +25,27 @@ The skill installer detects supported user-wide agent harnesses. Use
 `--path <skills-directory>` for another location and `--force` to update an
 existing installation.
 
+After the CLI is updated, the next interactive Tincan command lists stale
+installed skills and offers to update them before continuing. Non-interactive
+commands never prompt.
+
 `init` creates `.tincan/` and excludes it from normal Git tracking through the
 repository's local exclude file.
 
 ## Commands
 
-| Command | Purpose |
-| --- | --- |
-| `init [PATH]` | Initialize Tincan in a Git repository. |
-| `journal` | Record meaningful progress, questions, and next steps. |
-| `resume` | Print the latest journal entry. |
-| `decide STATEMENT` | Record an accepted decision. |
-| `learn STATEMENT` | Record an evidence-supported learning. |
-| `search QUERY` | Search headings, metadata, and Markdown bodies. |
-| `show UUID` | Print one decision or learning. |
-| `summary [PATH]` | Count decisions, learnings, and journal entries. Add `--verbose` to list their headings. |
-| `check` | Find records related to changed files. |
-| `skill install` | Install the bundled agent skill. |
+| Command | What it does | Why use it |
+| --- | --- | --- |
+| `init [PATH]` | Creates private `.tincan/` storage. | Start using Tincan in a project. |
+| `journal` | Adds meaningful progress, questions, or next steps to today's journal. | Preserve short-term continuity without recording every action. |
+| `resume` | Prints the latest journal. | Recover current work and open matters at the start of a session. |
+| `decide STATEMENT` | Creates an accepted decision with optional file and topic links. | Preserve a choice that should constrain future work. |
+| `learn STATEMENT` | Creates an evidence-supported learning. | Reuse a durable conclusion established by real evidence. |
+| `search QUERY` | Searches headings, metadata, and Markdown bodies. | Find relevant memory without knowing a record ID. |
+| `show UUID` | Prints one complete decision or learning. | Load a specific record returned by `search` or `changes`. |
+| `summary [PATH]` | Counts stored decisions, learnings, and journals. | See what memory exists; add `--verbose` for headings and paths. |
+| `changes` | Matches Git-changed files to records linked through `--file`. | Let an agent recover relevant constraints without guessing search terms. |
+| `skill install` | Installs the bundled workflow into selected agent harnesses. | Have agents maintain and consult Tincan during development. |
 
 Commands use the current directory by default. Pass `-d <path>` or
 `--directory <path>` to target another directory.
@@ -63,7 +67,7 @@ tincan resume
 tincan search "storage"
 tincan show <record-id>
 tincan summary
-tincan check
+tincan changes
 ```
 
 `decide` and `learn` create UUID-named Markdown files with validated
