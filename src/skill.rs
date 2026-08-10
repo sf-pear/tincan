@@ -8,6 +8,7 @@ use crate::util::display_path;
 
 const SKILL: &str = include_str!("../skills/tincan/SKILL.md");
 const INSTALL_CONFIRM_DEFAULT: bool = true;
+const INSTALL_ACTION: &str = "Install or update Tincan";
 const UPDATE_NOTICE: &str = "Agent Skill update available. Run `tincan skill install` to update.";
 const OPENAI_METADATA: &str = include_str!("../skills/tincan/agents/openai.yaml");
 const PICKER_HELP: &str =
@@ -79,7 +80,7 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
             continue;
         }
         println!("✔ Select user-wide Agent Skills destinations");
-        println!("The Tincan skill will be installed in:");
+        println!("The Tincan skill will be installed or updated in:");
         for index in &indices {
             if let Some(root) = roots.get(*index) {
                 println!("  - {}: {}", root.name, display_user_path(&root.path));
@@ -87,7 +88,7 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
         }
         let confirmed = Confirm::with_theme(&theme)
             .with_prompt(format!(
-                "Install Tincan in {} selected destination{}?",
+                "{INSTALL_ACTION} in {} selected destination{}?",
                 selected.len(),
                 if selected.len() == 1 { "" } else { "s" }
             ))
@@ -357,6 +358,11 @@ mod tests {
     #[test]
     fn confirms_skill_installation_by_default() {
         assert!(INSTALL_CONFIRM_DEFAULT);
+    }
+
+    #[test]
+    fn interactive_confirmation_explicitly_covers_updates() {
+        assert_eq!(INSTALL_ACTION, "Install or update Tincan");
     }
 
     #[test]

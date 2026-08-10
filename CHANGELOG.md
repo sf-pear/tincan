@@ -6,6 +6,18 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+### Fixed
+
+- Let a confirmed interactive `tincan skill install` update existing Tincan
+  installations without requiring a second run with `--force`. Explicit
+  `--path` destinations retain the existing overwrite protection.
+
+### Changed
+
+- Keep decisions and learnings solely in their dated canonical records. Remove
+  `journal --decision` and `journal --learning`, and omit those sections from
+  new journals while preserving them in existing journal history.
+
 ## [0.3.2] - 2026-08-06
 
 ### Changed

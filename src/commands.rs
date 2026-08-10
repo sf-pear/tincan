@@ -41,6 +41,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
 
 fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), String> {
     branding::print();
+    let overwrite = overwrite_existing_skill(path.as_deref(), force);
     let roots = match path {
         Some(path) => vec![path],
         None => {
@@ -59,7 +60,7 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
         }
     };
 
-    let outcomes = skill::install_many(&roots, force)?;
+    let outcomes = skill::install_many(&roots, overwrite)?;
     let mut installed = false;
     for outcome in outcomes {
         match outcome {
@@ -82,6 +83,10 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
         println!("Restart or reload the agent harness to discover it.");
     }
     Ok(())
+}
+
+fn overwrite_existing_skill(path: Option<&std::path::Path>, force: bool) -> bool {
+    path.is_none() || force
 }
 
 fn init(path: std::path::PathBuf) -> Result<(), String> {
@@ -207,8 +212,6 @@ fn journal(args: JournalArgs) -> Result<(), String> {
     let created_at = now.to_rfc3339_opts(SecondsFormat::Secs, true);
     let sections = store::JournalSections {
         done: &args.done,
-        decisions: &args.decisions,
-        learnings: &args.learnings,
         planned: &args.planned,
         questions: &args.questions,
         next: &args.next,
@@ -414,6 +417,19 @@ mod tests {
         assert!(paths_overlap("src/feature/a.rs", "src/feature"));
         assert!(paths_overlap("src/feature", "src/feature/a.rs"));
         assert!(!paths_overlap("src/a.rs", "src/b.rs"));
+    }
+
+    #[test]
+    fn confirmed_interactive_skill_install_updates_existing_destinations() {
+        assert!(overwrite_existing_skill(None, false));
+        assert!(!overwrite_existing_skill(
+            Some(std::path::Path::new("custom-skills")),
+            false
+        ));
+        assert!(overwrite_existing_skill(
+            Some(std::path::Path::new("custom-skills")),
+            true
+        ));
     }
 
     #[test]
