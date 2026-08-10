@@ -21,8 +21,6 @@ pub enum Command {
 pub struct JournalArgs {
     pub repo: PathBuf,
     pub done: Vec<String>,
-    pub decisions: Vec<String>,
-    pub learnings: Vec<String>,
     pub planned: Vec<String>,
     pub questions: Vec<String>,
     pub next: Vec<String>,
@@ -129,39 +127,21 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
 
 fn parse_journal(args: &[String]) -> Result<Command, String> {
     let values = Flags::parse(args)?;
-    values.ensure_only(&[
-        "directory",
-        "done",
-        "decision",
-        "learning",
-        "planned",
-        "question",
-        "next",
-    ])?;
+    values.ensure_only(&["directory", "done", "planned", "question", "next"])?;
     values.ensure_at_most_one(&["directory"])?;
     if !values.positionals.is_empty() {
         return Err("journal does not accept positional arguments".to_string());
     }
     let done = values.many("done");
-    let decisions = values.many("decision");
-    let learnings = values.many("learning");
     let planned = values.many("planned");
     let questions = values.many("question");
     let next = values.many("next");
-    if done.is_empty()
-        && decisions.is_empty()
-        && learnings.is_empty()
-        && planned.is_empty()
-        && questions.is_empty()
-        && next.is_empty()
-    {
+    if done.is_empty() && planned.is_empty() && questions.is_empty() && next.is_empty() {
         return Err("journal requires at least one journal bullet".to_string());
     }
     Ok(Command::Journal(JournalArgs {
         repo: values.directory()?,
         done,
-        decisions,
-        learnings,
         planned,
         questions,
         next,
@@ -439,7 +419,6 @@ EXAMPLES
 
 JOURNAL OPTIONS
   tincan journal [-d|--directory PATH] [--done TEXT ...]
-                 [--decision TEXT ...] [--learning TEXT ...]
                  [--planned TEXT ...] [--question TEXT ...] [--next TEXT ...]
 
   At least one journal bullet is required. Each bullet option is repeatable.
@@ -573,11 +552,22 @@ mod tests {
             panic!("expected journal command");
         };
         assert_eq!(journal.done, vec!["Implemented search"]);
-        assert!(journal.decisions.is_empty());
-        assert!(journal.learnings.is_empty());
         assert!(journal.planned.is_empty());
         assert_eq!(journal.questions, vec!["Should topics be normalized?"]);
         assert_eq!(journal.next, vec!["Test on another repository"]);
+    }
+
+    #[test]
+    fn rejects_decisions_and_learnings_as_journal_duplicates() {
+        for option in ["--decision", "--learning"] {
+            let error = parse(
+                ["journal", option, "Keep Markdown canonical"]
+                    .map(str::to_string)
+                    .to_vec(),
+            )
+            .unwrap_err();
+            assert!(error.contains(&format!("unknown option {option}")));
+        }
     }
 
     #[test]

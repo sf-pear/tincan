@@ -139,11 +139,15 @@ pub struct JournalUpdate {
 
 pub struct JournalSections<'a> {
     pub done: &'a [String],
-    pub decisions: &'a [String],
-    pub learnings: &'a [String],
     pub planned: &'a [String],
     pub questions: &'a [String],
     pub next: &'a [String],
+}
+
+struct JournalRender<'a> {
+    current: JournalSections<'a>,
+    legacy_decisions: &'a [String],
+    legacy_learnings: &'a [String],
 }
 
 pub fn update_journal(
@@ -161,8 +165,8 @@ pub fn update_journal(
     };
     let original_created_at = scalar(&existing, "created_at").unwrap_or_else(|| created_at.into());
     let mut done_items = markdown_bullets(&existing, "## Done");
-    let mut decision_items = markdown_bullets(&existing, "## Decisions");
-    let mut learning_items = markdown_bullets(&existing, "## Learnings");
+    let legacy_decisions = markdown_bullets(&existing, "## Decisions");
+    let legacy_learnings = markdown_bullets(&existing, "## Learnings");
     let mut planned_items = markdown_bullets(&existing, "## Planned");
     let mut question_items = markdown_bullets(&existing, "## Open questions");
     let mut next_items = markdown_bullets(&existing, "## Next");
@@ -175,16 +179,10 @@ pub fn update_journal(
         }
         next_items.retain(|next_item| next_item != &item);
     }
-    for (values, items) in [
-        (sections.decisions, &mut decision_items),
-        (sections.learnings, &mut learning_items),
-        (sections.planned, &mut planned_items),
-    ] {
-        for item in clean_bullets(values) {
-            if !items.contains(&item) {
-                items.push(item);
-                added += 1;
-            }
+    for item in clean_bullets(sections.planned) {
+        if !planned_items.contains(&item) {
+            planned_items.push(item);
+            added += 1;
         }
     }
     for item in clean_bullets(sections.questions) {
@@ -200,13 +198,15 @@ pub fn update_journal(
         }
     }
 
-    let rendered = JournalSections {
-        done: &done_items,
-        decisions: &decision_items,
-        learnings: &learning_items,
-        planned: &planned_items,
-        questions: &question_items,
-        next: &next_items,
+    let rendered = JournalRender {
+        current: JournalSections {
+            done: &done_items,
+            planned: &planned_items,
+            questions: &question_items,
+            next: &next_items,
+        },
+        legacy_decisions: &legacy_decisions,
+        legacy_learnings: &legacy_learnings,
     };
     let content = render_journal(date, &original_created_at, rendered);
     fs::write(&path, content)
@@ -259,20 +259,26 @@ fn markdown_bullets(text: &str, heading: &str) -> Vec<String> {
     values
 }
 
-fn render_journal(date: &str, created_at: &str, sections: JournalSections<'_>) -> String {
+fn render_journal(date: &str, created_at: &str, sections: JournalRender<'_>) -> String {
     let mut output = format!(
         "---\nid: {}\ntype: \"journal\"\ncreated_at: {}\n---\n\n# {date}\n",
         crate::util::yaml_string(&format!("journal-{date}")),
         crate::util::yaml_string(created_at),
     );
-    for (heading, values) in [
-        ("Done", sections.done),
-        ("Decisions", sections.decisions),
-        ("Learnings", sections.learnings),
-        ("Planned", sections.planned),
-        ("Open questions", sections.questions),
-        ("Next", sections.next),
-    ] {
+    let current = sections.current;
+    let mut rendered_sections = vec![("Done", current.done)];
+    if !sections.legacy_decisions.is_empty() {
+        rendered_sections.push(("Decisions", sections.legacy_decisions));
+    }
+    if !sections.legacy_learnings.is_empty() {
+        rendered_sections.push(("Learnings", sections.legacy_learnings));
+    }
+    rendered_sections.extend([
+        ("Planned", current.planned),
+        ("Open questions", current.questions),
+        ("Next", current.next),
+    ]);
+    for (heading, values) in rendered_sections {
         output.push_str(&format!("\n## {heading}\n\n"));
         if values.is_empty() {
             output.push_str("<!-- none -->\n");
@@ -747,8 +753,6 @@ mod tests {
             "2026-08-05T09:00:00+02:00",
             JournalSections {
                 done: &[],
-                decisions: &[],
-                learnings: &[],
                 planned: &[],
                 questions: &["Should this be shared?".into()],
                 next: &["Implement journal".into()],
@@ -761,8 +765,6 @@ mod tests {
             "2026-08-05T10:00:00+02:00",
             JournalSections {
                 done: &["Implement journal".into()],
-                decisions: &["Keep Markdown canonical".into()],
-                learnings: &["Nested repositories need workspace-relative paths".into()],
                 planned: &["Add a plan".into()],
                 questions: &["Should this be shared?".into()],
                 next: &[],
@@ -775,6 +777,42 @@ mod tests {
         assert_eq!(content.matches("- Implement journal").count(), 1);
         assert_eq!(content.matches("- Should this be shared?").count(), 1);
         assert!(content.contains("created_at: \"2026-08-05T09:00:00+02:00\""));
+        assert!(!content.contains("## Decisions"));
+        assert!(!content.contains("## Learnings"));
+        assert!(content.contains("## Planned\n\n- Add a plan"));
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn preserves_legacy_decision_and_learning_sections_without_creating_new_ones() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let repo = std::env::temp_dir().join(format!("tincan-legacy-journal-{unique}"));
+        fs::create_dir_all(&repo).unwrap();
+        let root = initialize(&repo).unwrap();
+        let path = root.join("journal/2026-08-05.md");
+        fs::write(
+            &path,
+            "---\nid: \"journal-2026-08-05\"\ntype: \"journal\"\ncreated_at: \"2026-08-05T09:00:00+02:00\"\n---\n\n# 2026-08-05\n\n## Done\n\n<!-- none -->\n\n## Decisions\n\n- Keep Markdown canonical\n\n## Learnings\n\n- Nested repositories need workspace-relative paths\n\n## Planned\n\n<!-- none -->\n\n## Open questions\n\n<!-- none -->\n\n## Next\n\n<!-- none -->\n",
+        )
+        .unwrap();
+
+        update_journal(
+            &repo,
+            "2026-08-05",
+            "2026-08-05T10:00:00+02:00",
+            JournalSections {
+                done: &[],
+                planned: &["Add a plan".into()],
+                questions: &[],
+                next: &[],
+            },
+        )
+        .unwrap();
+
+        let content = fs::read_to_string(path).unwrap();
         assert!(content.contains("## Decisions\n\n- Keep Markdown canonical"));
         assert!(
             content.contains("## Learnings\n\n- Nested repositories need workspace-relative paths")

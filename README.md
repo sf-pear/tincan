@@ -17,7 +17,7 @@ important decisions are missed.
 Tincan keeps a small record of what matters:
 
 - **Plan:** the small, living list of intended outcomes.
-- **Journal:** meaningful progress, decisions, learnings, open questions, and next steps.
+- **Journal:** meaningful progress, open questions, plans, and next steps.
 - **Decision:** an accepted choice that should guide future work.
 - **Learning:** an evidence-supported conclusion worth remembering.
 
@@ -57,7 +57,6 @@ tincan plan
 tincan decide "Load full media details on demand" --file web/app/page.tsx
 tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
 tincan journal --done "Implemented the compact gallery read model" `
-  --decision "Load full media details on demand" `
   --planned "Add the stale-response regression test" `
   --next "Start with the stale-response test"
 

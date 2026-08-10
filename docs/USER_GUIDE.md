@@ -7,7 +7,7 @@ repositories.
 ## Memory
 
 - **Plan:** current outcome-level work and ideas. It is a small living document.
-- **Journal:** a dated snapshot of done, decided, learned, planned, open, and next.
+- **Journal:** a dated snapshot of done, planned, open, and next.
 - **Decision:** an accepted choice that constrains future work.
 - **Learning:** a durable conclusion supported by evidence.
 
@@ -60,15 +60,15 @@ Every option is repeatable:
 ```powershell
 tincan journal `
   --done "Implemented workspace discovery" `
-  --decision "One Tincan workspace may contain several repositories" `
-  --learning "Persistent plan.md is not a cross-agent convention" `
   --planned "Add wrap-up guidance to the skill" `
   --question "Should plans later support priorities?" `
   --next "Exercise the workflow in a real multi-repo project"
 ```
 
-Journal bullets are one-line summaries. Put lasting reasoning in decision or
-learning records. Keep the plan limited to current direction, not implementation
-checklists or a duplicate of an issue tracker.
+Journal bullets are one-line summaries. Record accepted choices with `decide`
+and durable evidence-backed conclusions with `learn`; do not duplicate them in
+the journal. Their timestamps preserve when they were recorded. Keep the plan
+limited to current direction, not implementation checklists or a duplicate of
+an issue tracker.
 
 Run `tincan --help` for complete syntax.

@@ -28,8 +28,8 @@ Remove completed items because the journal preserves their history.
 
 ## Classify memory
 
-- Journal bullets summarize meaningful completed work, decisions, learnings,
-  planned work, open questions, and the concrete next starting point. Include
+- Journal bullets summarize meaningful completed work, planned work, open
+  questions, and the concrete next starting point. Include
   transient status only when it materially explains progress, a blocker, an
   open question, or where work should resume.
 - `tincan decide <statement>` records an accepted choice that constrains future
@@ -58,8 +58,9 @@ Treat natural requests such as "wrap up", "done for today", "good night",
 2. Record any missed durable decisions or learnings. Do not invent acceptance
    or evidence.
 3. Update `.tincan/plan.md` so it reflects only current direction.
-4. Update today's journal with repeatable `--done`, `--decision`, `--learning`,
-   `--planned`, `--question`, and `--next` options. Keep bullets short.
+4. Update today's journal with repeatable `--done`, `--planned`, `--question`,
+   and `--next` options. Keep bullets short. Do not duplicate decisions or
+   learnings in the journal; their dated records are canonical.
 5. Run `tincan resume` and show the finalized journal to the user.
 
 Distinguish implemented and verified work from work that was only decided or
