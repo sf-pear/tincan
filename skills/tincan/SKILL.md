@@ -20,6 +20,14 @@ workspace may contain zero, one, or several Git repositories.
 4. Run `tincan changes` when existing file-linked memory may matter. Search
    focused terms with `tincan search`, and load relevant records with `show`.
 
+## Keep the skill current
+
+Run `tincan skill status` when the user asks whether installed Tincan skills are
+current or when troubleshooting differing behavior between agents. The check is
+read-only. If it reports an available update, ask the user to run
+`tincan skill install`; do not modify user-wide skill installations without
+their confirmation.
+
 ## Maintain the plan
 
 Edit `.tincan/plan.md` directly. Keep only current outcome-level work and ideas.

@@ -26,6 +26,19 @@ pub struct SkillRoot {
     pub path: PathBuf,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum InstallationState {
+    Current,
+    UpdateAvailable,
+    NotInstalled,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct InstallationStatus {
+    pub root: SkillRoot,
+    pub state: InstallationState,
+}
+
 pub fn detect_roots() -> Vec<SkillRoot> {
     let home = nonempty_env("USERPROFILE")
         .or_else(|| nonempty_env("HOME"))
@@ -45,18 +58,40 @@ pub fn notify_if_update_available() {
     eprintln!("{UPDATE_NOTICE}");
 }
 
+pub fn installation_statuses() -> Vec<InstallationStatus> {
+    installation_statuses_for(detect_roots())
+}
+
+fn installation_statuses_for(roots: Vec<SkillRoot>) -> Vec<InstallationStatus> {
+    roots
+        .into_iter()
+        .map(|root| {
+            let destination = root.path.join("tincan");
+            let state = if !destination.is_dir() {
+                InstallationState::NotInstalled
+            } else if installed_skill_is_current(&root) {
+                InstallationState::Current
+            } else {
+                InstallationState::UpdateAvailable
+            };
+            InstallationStatus { root, state }
+        })
+        .collect()
+}
+
 fn outdated_roots(roots: &[SkillRoot]) -> Vec<&SkillRoot> {
     roots
         .iter()
-        .filter(|root| {
-            let destination = root.path.join("tincan");
-            let skill = destination.join("SKILL.md");
-            let metadata = destination.join("agents").join("openai.yaml");
-            destination.is_dir()
-                && (read(&skill).ok().as_deref() != Some(SKILL)
-                    || read(&metadata).ok().as_deref() != Some(OPENAI_METADATA))
-        })
+        .filter(|root| root.path.join("tincan").is_dir() && !installed_skill_is_current(root))
         .collect()
+}
+
+fn installed_skill_is_current(root: &SkillRoot) -> bool {
+    let destination = root.path.join("tincan");
+    let skill = destination.join("SKILL.md");
+    let metadata = destination.join("agents").join("openai.yaml");
+    read(&skill).ok().as_deref() == Some(SKILL)
+        && read(&metadata).ok().as_deref() == Some(OPENAI_METADATA)
 }
 
 pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>, String> {
@@ -459,6 +494,41 @@ mod tests {
         let outdated = outdated_roots(&roots);
         assert_eq!(outdated.len(), 1);
         assert_eq!(outdated[0].name, "Installed");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn reports_current_outdated_and_missing_skill_installations() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tincan-skill-status-{unique}"));
+        let current = root.join("current");
+        let outdated = root.join("outdated");
+        let missing = root.join("missing");
+        install_many(std::slice::from_ref(&current), false).unwrap();
+        fs::create_dir_all(outdated.join("tincan")).unwrap();
+        fs::write(outdated.join("tincan/SKILL.md"), "older skill").unwrap();
+
+        let statuses = installation_statuses_for(vec![
+            SkillRoot {
+                name: "Current".into(),
+                path: current,
+            },
+            SkillRoot {
+                name: "Outdated".into(),
+                path: outdated,
+            },
+            SkillRoot {
+                name: "Missing".into(),
+                path: missing,
+            },
+        ]);
+
+        assert_eq!(statuses[0].state, InstallationState::Current);
+        assert_eq!(statuses[1].state, InstallationState::UpdateAvailable);
+        assert_eq!(statuses[2].state, InstallationState::NotInstalled);
         fs::remove_dir_all(root).unwrap();
     }
 }

@@ -44,8 +44,12 @@ cargo install tincan-cli
 tincan skill install
 ```
 
-From a source checkout, use `cargo install --path .`. After updating the CLI,
-the next interactive Tincan command offers to update stale installed skills.
+From a source checkout, use `cargo install --path . --force`. After updating
+the CLI, the next successful interactive Tincan command reports stale installed
+skills and directs you to run `tincan skill install`. Use
+`tincan skill status` for a concise read-only health check that also works in
+agent-driven and non-interactive terminals; it groups installations that need
+updates separately from those already current.
 
 ## Quick start
 

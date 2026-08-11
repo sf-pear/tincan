@@ -11,7 +11,8 @@ use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
     let command = command?;
-    let notify_about_skill_update = !matches!(command, Command::SkillInstall { .. });
+    let notify_about_skill_update =
+        !matches!(command, Command::SkillInstall { .. } | Command::SkillStatus);
     let result = match command {
         Command::Help => {
             branding::print();
@@ -32,11 +33,66 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Show { repo, id } => show(repo, &id),
         Command::Changes { repo } => changes(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
+        Command::SkillStatus => skill_status(),
     };
     if result.is_ok() && notify_about_skill_update {
         skill::notify_if_update_available();
     }
     result
+}
+
+fn skill_status() -> Result<(), String> {
+    for line in skill_status_lines(skill::installation_statuses()) {
+        println!("{line}");
+    }
+    Ok(())
+}
+
+fn skill_status_lines(statuses: Vec<skill::InstallationStatus>) -> Vec<String> {
+    if statuses.is_empty() {
+        return vec!["No supported Agent Skills destinations detected.".into()];
+    }
+    let current = statuses
+        .iter()
+        .filter(|status| status.state == skill::InstallationState::Current)
+        .collect::<Vec<_>>();
+    let outdated = statuses
+        .iter()
+        .filter(|status| status.state == skill::InstallationState::UpdateAvailable)
+        .collect::<Vec<_>>();
+    if current.is_empty() && outdated.is_empty() {
+        let mut lines = vec!["Agent Skill is not installed.".into()];
+        append_skill_locations(&mut lines, "Available destinations:", statuses.iter());
+        lines.push("Run `tincan skill install` to install it.".into());
+        return lines;
+    }
+    if outdated.is_empty() {
+        let mut lines = vec!["Agent Skill is up to date everywhere.".into()];
+        append_skill_locations(&mut lines, "Installed in:", current.into_iter());
+        return lines;
+    }
+    let mut lines = vec!["Agent Skill update available.".into()];
+    append_skill_locations(&mut lines, "Needs update:", outdated.into_iter());
+    if !current.is_empty() {
+        append_skill_locations(&mut lines, "Already up to date:", current.into_iter());
+    }
+    lines.push("Run `tincan skill install` to update.".into());
+    lines
+}
+
+fn append_skill_locations<'a>(
+    lines: &mut Vec<String>,
+    heading: &str,
+    statuses: impl Iterator<Item = &'a skill::InstallationStatus>,
+) {
+    lines.push(heading.into());
+    lines.extend(statuses.map(|status| {
+        format!(
+            "- {} ({})",
+            status.root.name,
+            skill::display_user_path(&status.root.path.join("tincan"))
+        )
+    }));
 }
 
 fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), String> {
@@ -430,6 +486,56 @@ mod tests {
             Some(std::path::Path::new("custom-skills")),
             true
         ));
+    }
+
+    #[test]
+    fn skill_status_groups_outdated_and_current_installations() {
+        let statuses = vec![
+            skill::InstallationStatus {
+                root: skill::SkillRoot {
+                    name: "Current".into(),
+                    path: std::path::PathBuf::from("current"),
+                },
+                state: skill::InstallationState::Current,
+            },
+            skill::InstallationStatus {
+                root: skill::SkillRoot {
+                    name: "Outdated".into(),
+                    path: std::path::PathBuf::from("outdated"),
+                },
+                state: skill::InstallationState::UpdateAvailable,
+            },
+            skill::InstallationStatus {
+                root: skill::SkillRoot {
+                    name: "Missing".into(),
+                    path: std::path::PathBuf::from("missing"),
+                },
+                state: skill::InstallationState::NotInstalled,
+            },
+        ];
+
+        let lines = skill_status_lines(statuses);
+        assert_eq!(lines[0], "Agent Skill update available.");
+        assert_eq!(lines[1], "Needs update:");
+        assert!(lines[2].contains("Outdated"));
+        assert_eq!(lines[3], "Already up to date:");
+        assert!(lines[4].contains("Current"));
+        assert!(lines.iter().all(|line| !line.contains("Missing")));
+    }
+
+    #[test]
+    fn skill_status_leads_with_health_then_lists_installed_locations() {
+        let statuses = vec![skill::InstallationStatus {
+            root: skill::SkillRoot {
+                name: "Current".into(),
+                path: std::path::PathBuf::from("current"),
+            },
+            state: skill::InstallationState::Current,
+        }];
+        let lines = skill_status_lines(statuses);
+        assert_eq!(lines[0], "Agent Skill is up to date everywhere.");
+        assert_eq!(lines[1], "Installed in:");
+        assert!(lines[2].contains("Current"));
     }
 
     #[test]

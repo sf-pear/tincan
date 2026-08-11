@@ -15,6 +15,7 @@ pub enum Command {
     Show { repo: PathBuf, id: String },
     Changes { repo: PathBuf },
     SkillInstall { path: Option<PathBuf>, force: bool },
+    SkillStatus,
 }
 
 #[derive(Debug, PartialEq)]
@@ -167,19 +168,23 @@ fn parse_summary(args: &[String]) -> Result<Command, String> {
 }
 
 fn parse_skill(args: &[String]) -> Result<Command, String> {
-    if args.first().map(String::as_str) != Some("install") {
-        return Err("skill requires `install`".to_string());
+    match args.first().map(String::as_str) {
+        Some("install") => {
+            let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["path", "force"])?;
+            values.ensure_at_most_one(&["path", "force"])?;
+            if !values.positionals.is_empty() {
+                return Err("skill install does not accept positional arguments".to_string());
+            }
+            Ok(Command::SkillInstall {
+                path: values.one("path").map(PathBuf::from),
+                force: values.present("force"),
+            })
+        }
+        Some("status") if args.len() == 1 => Ok(Command::SkillStatus),
+        Some("status") => Err("skill status does not accept arguments".to_string()),
+        _ => Err("skill requires `install` or `status`".to_string()),
     }
-    let values = Flags::parse(&args[1..])?;
-    values.ensure_only(&["path", "force"])?;
-    values.ensure_at_most_one(&["path", "force"])?;
-    if !values.positionals.is_empty() {
-        return Err("skill install does not accept positional arguments".to_string());
-    }
-    Ok(Command::SkillInstall {
-        path: values.one("path").map(PathBuf::from),
-        force: values.present("force"),
-    })
 }
 
 fn parse_record(kind: &str, args: &[String]) -> Result<Command, String> {
@@ -394,6 +399,7 @@ COMMANDS
                                 Print one record; use an ID returned by search
   changes [-d|--directory PATH] Show memory related to Git-changed paths
   skill install [OPTIONS]       Install the bundled Agent Skill
+  skill status                  Check detected Agent Skill installations
   help, --help                  Print this help
   version, --version            Print the installed Tincan version
 
@@ -431,6 +437,12 @@ SKILL INSTALL
   or none, Enter to continue, and Escape to cancel. Every installation requires
   answering a final Y/n confirmation; pressing Enter accepts. Use --path for an
   explicit, non-interactive or project-local destination.
+
+SKILL STATUS
+  tincan skill status
+
+  Report overall Agent Skill health and group detected installations by update
+  state. This command is read-only and works without an interactive terminal.
 
 RECORD OPTIONS
   tincan decide STATEMENT [OPTIONS]
@@ -528,6 +540,19 @@ mod tests {
                 path: Some(PathBuf::from("agent-skills")),
                 force: true,
             }
+        );
+    }
+
+    #[test]
+    fn parses_read_only_skill_status() {
+        assert_eq!(
+            parse(["skill", "status"].map(str::to_string).to_vec()).unwrap(),
+            Command::SkillStatus
+        );
+        assert!(
+            parse(["skill", "status", "extra"].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("does not accept arguments")
         );
     }
 

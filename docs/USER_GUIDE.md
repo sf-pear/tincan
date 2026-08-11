@@ -32,6 +32,8 @@ tincan init C:\path\to\workspace
 `init` creates `.tincan/`. When the workspace is inside a Git repository,
 Tincan verifies that the folder is untracked and adds it to that repository's
 local exclude file. A non-Git parent needs no ignore rule for its child repos.
+After updating the CLI, run `tincan skill status` to check every detected
+installation and `tincan skill install` when an update is available.
 
 ## Commands
 
@@ -48,6 +50,7 @@ local exclude file. A non-Git parent needs no ignore rule for its child repos.
 | `summary [PATH]` | Count stored memory; `--verbose` lists headings and paths. |
 | `changes` | Match changed files across nested Git repos to records linked by `--file`. |
 | `skill install` | Install the agent workflow into selected harnesses. |
+| `skill status` | Check whether detected Agent Skill installations are current. |
 
 Commands find the nearest parent `.tincan/config.toml`. Use `-d <path>` or
 `--directory <path>` to start from another directory. Store `--file` values

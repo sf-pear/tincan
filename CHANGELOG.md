@@ -6,17 +6,25 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
-### Fixed
+## [0.4.0] - 2026-08-11
 
-- Let a confirmed interactive `tincan skill install` update existing Tincan
-  installations without requiring a second run with `--force`. Explicit
-  `--path` destinations retain the existing overwrite protection.
+### Added
+
+- Add read-only `tincan skill status` output with an overall health headline
+  and grouped installation details. It works in interactive, scripted, and
+  agent-driven terminals.
 
 ### Changed
 
 - Keep decisions and learnings solely in their dated canonical records. Remove
   `journal --decision` and `journal --learning`, and omit those sections from
   new journals while preserving them in existing journal history.
+
+### Fixed
+
+- Let a confirmed interactive `tincan skill install` update existing Tincan
+  installations without requiring a second run with `--force`. Explicit
+  `--path` destinations retain the existing overwrite protection.
 
 ## [0.3.2] - 2026-08-06
 
