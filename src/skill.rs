@@ -62,6 +62,22 @@ pub fn installation_statuses() -> Vec<InstallationStatus> {
     installation_statuses_for(detect_roots())
 }
 
+pub fn pending_roots(roots: &[SkillRoot]) -> Vec<SkillRoot> {
+    roots
+        .iter()
+        .filter(|root| !installed_skill_is_current(root))
+        .cloned()
+        .collect()
+}
+
+pub fn install_action(root: &SkillRoot) -> &'static str {
+    if root.path.join("tincan").exists() {
+        "Update"
+    } else {
+        "Install"
+    }
+}
+
 fn installation_statuses_for(roots: Vec<SkillRoot>) -> Vec<InstallationStatus> {
     roots
         .into_iter()
@@ -100,7 +116,7 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
     let theme = ColorfulTheme::default();
     loop {
         let Some(indices) = MultiSelect::with_theme(&theme)
-            .with_prompt("Select user-wide Agent Skills destinations")
+            .with_prompt("Select Tincan skill installations")
             .items(&labels)
             .defaults(&defaults)
             .report(false)
@@ -114,11 +130,16 @@ pub fn choose_interactively(roots: &[SkillRoot]) -> Result<Option<Vec<PathBuf>>,
             eprintln!("No destinations selected. Select at least one or press Escape to cancel.");
             continue;
         }
-        println!("✔ Select user-wide Agent Skills destinations");
+        println!("✔ Select Tincan skill installations");
         println!("The Tincan skill will be installed or updated in:");
         for index in &indices {
             if let Some(root) = roots.get(*index) {
-                println!("  - {}: {}", root.name, display_user_path(&root.path));
+                println!(
+                    "  - {} Tincan in {}: {}",
+                    install_action(root),
+                    root.name,
+                    display_user_path(&root.path.join("tincan"))
+                );
             }
         }
         let confirmed = Confirm::with_theme(&theme)
@@ -257,9 +278,13 @@ fn selection_labels(roots: &[SkillRoot]) -> Vec<String> {
         .iter()
         .map(|root| {
             format!(
-                "{}: {}",
+                "{} Tincan in {}: {}",
+                install_action(root),
                 root.name,
-                root.path.to_string_lossy().replace(['\n', '\r'], " ")
+                root.path
+                    .join("tincan")
+                    .to_string_lossy()
+                    .replace(['\n', '\r'], " ")
             )
         })
         .collect()
@@ -375,7 +400,12 @@ mod tests {
         ];
         let labels = selection_labels(&roots);
         assert_eq!(labels.len(), 2);
-        assert!(labels[0].contains("First: first/skills"));
+        assert!(labels[0].starts_with("Install Tincan in First: "));
+        assert!(
+            labels[0]
+                .replace('\\', "/")
+                .ends_with("first/skills/tincan")
+        );
         assert!(labels.iter().all(|label| !label.contains('\n')));
         let selected = selected_paths(&roots, &[1]);
         assert_eq!(selected, vec![PathBuf::from("second/skills")]);
@@ -388,6 +418,40 @@ mod tests {
             path: PathBuf::from("only/skills"),
         }];
         assert_eq!(default_selections(&roots), vec![true]);
+    }
+
+    #[test]
+    fn distinguishes_new_current_and_outdated_installations() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tincan-skill-actions-{unique}"));
+        let missing = SkillRoot {
+            name: "Missing".to_string(),
+            path: root.join("missing"),
+        };
+        let current = SkillRoot {
+            name: "Current".to_string(),
+            path: root.join("current"),
+        };
+        let outdated = SkillRoot {
+            name: "Outdated".to_string(),
+            path: root.join("outdated"),
+        };
+        install_many(std::slice::from_ref(&current.path), false).unwrap();
+        fs::create_dir_all(outdated.path.join("tincan")).unwrap();
+        fs::write(outdated.path.join("tincan/SKILL.md"), "older skill").unwrap();
+
+        assert_eq!(install_action(&missing), "Install");
+        assert_eq!(install_action(&outdated), "Update");
+        assert_eq!(install_action(&current), "Update");
+        assert_eq!(
+            pending_roots(&[missing.clone(), current, outdated.clone()]),
+            vec![missing, outdated]
+        );
+
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]
@@ -450,6 +514,17 @@ mod tests {
             assert!(SKILL.contains(instruction));
         }
         assert!(!SKILL.contains("AGENT_GUIDE.md"));
+    }
+
+    #[test]
+    fn bundled_skill_uses_one_startup_command_and_requires_lift_approval() {
+        assert!(!SKILL.contains("tincan --help"));
+        assert!(SKILL.contains("Run `tincan resume` once"));
+        assert!(SKILL.contains(
+            "I think this learning could be useful in other projects. Make it a global learning?"
+        ));
+        assert!(SKILL.contains("run `tincan lift <learning-id> --from <markdown-file>`"));
+        assert!(SKILL.contains("run `tincan search <learning-id>` before changing memory"));
     }
 
     #[test]

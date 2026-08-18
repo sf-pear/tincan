@@ -31,6 +31,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
+        Command::Lift { repo, id, from } => lift(repo, &id, &from),
         Command::Changes { repo } => changes(repo),
         Command::SkillInstall { path, force } => install_skill(path, force),
         Command::SkillStatus => skill_status(),
@@ -108,7 +109,12 @@ fn install_skill(path: Option<std::path::PathBuf>, force: bool) -> Result<(), St
                         .to_string(),
                 );
             }
-            let Some(selected) = skill::choose_interactively(&detected)? else {
+            let pending = skill::pending_roots(&detected);
+            if pending.is_empty() {
+                println!("Tincan skill is already current everywhere.");
+                return Ok(());
+            }
+            let Some(selected) = skill::choose_interactively(&pending)? else {
                 println!("Skill installation cancelled.");
                 return Ok(());
             };
@@ -284,28 +290,33 @@ fn journal(args: JournalArgs) -> Result<(), String> {
 
 fn resume(path: std::path::PathBuf) -> Result<(), String> {
     let root = workspace::find(&path)?;
+    print_plan(&root)?;
     let Some((journal_path, content)) = store::latest_journal(&root)? else {
+        println!();
         println!("No journal entries yet.");
         println!("Use `tincan journal --done <text>` as meaningful work develops.");
         return Ok(());
     };
-    println!("Latest journal: {}\n", display_path(&journal_path));
+    println!("\nLatest journal: {}\n", display_path(&journal_path));
     print!("{content}");
     Ok(())
 }
 
 fn plan(path: std::path::PathBuf) -> Result<(), String> {
     let root = workspace::find(&path)?;
-    let (plan_path, content) = store::read_plan(&root)?;
+    print_plan(&root)
+}
+
+fn print_plan(root: &std::path::Path) -> Result<(), String> {
+    let (plan_path, content) = store::read_plan(root)?;
     println!("Plan: {}\n", display_path(&plan_path));
     print!("{content}");
     Ok(())
 }
 
 fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
-    let root = workspace::find(&path)?;
     let query = query.to_lowercase();
-    let mut matches: Vec<_> = store::scan(&root)?
+    let mut matches: Vec<_> = lookup_documents(&path)?
         .into_iter()
         .filter_map(|document| search_rank(&document, &query).map(|rank| (rank, document)))
         .collect();
@@ -321,13 +332,73 @@ fn search(path: std::path::PathBuf, query: &str) -> Result<(), String> {
 }
 
 fn show(path: std::path::PathBuf, id: &str) -> Result<(), String> {
-    let root = workspace::find(&path)?;
-    let document = store::scan(&root)?
+    let document = lookup_documents(&path)?
         .into_iter()
         .find(|document| document.id == id)
         .ok_or_else(|| format!("no Tincan record found with id {id}"))?;
     print!("{}", store::read_document(&document)?);
     Ok(())
+}
+
+fn lift(path: std::path::PathBuf, id: &str, from: &std::path::Path) -> Result<(), String> {
+    let root = workspace::find(&path)?;
+    let source = store::scan(&root)?
+        .into_iter()
+        .find(|document| document.id == id)
+        .ok_or_else(|| format!("no project record found with id {id}"))?;
+    if source.kind != "learning" {
+        return Err(format!("{id} is not a project learning"));
+    }
+    if let Some(existing) = store::scan_global()?
+        .into_iter()
+        .find(|document| document.source_record.as_deref() == Some(id))
+    {
+        println!(
+            "Learning is already global: {}",
+            display_path(&existing.path)
+        );
+        println!("Record ID: {}", existing.id);
+        return Ok(());
+    }
+    let global_id = Uuid::now_v7().to_string();
+    let created_at = Local::now().to_rfc3339_opts(SecondsFormat::Secs, true);
+    let body = read_lift_body(from)?;
+    store::validate_global_learning_body(&body)?;
+    let source_workspace = root
+        .file_name()
+        .and_then(|value| value.to_str())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("workspace");
+    let global_path =
+        store::write_global_learning(&source, &global_id, &created_at, source_workspace, &body)?;
+    println!("Created global learning: {}", display_path(&global_path));
+    println!("Record ID: {global_id}");
+    println!("Source learning: {id}");
+    Ok(())
+}
+
+fn read_lift_body(path: &std::path::Path) -> Result<String, String> {
+    if path == std::path::Path::new("-") {
+        let mut content = String::new();
+        std::io::Read::read_to_string(&mut std::io::stdin(), &mut content)
+            .map_err(|error| format!("cannot read global learning Markdown from stdin: {error}"))?;
+        return Ok(content);
+    }
+    std::fs::read_to_string(path).map_err(|error| {
+        format!(
+            "cannot read global learning Markdown {}: {error}",
+            path.display()
+        )
+    })
+}
+
+fn lookup_documents(path: &std::path::Path) -> Result<Vec<store::Document>, String> {
+    let mut documents = match workspace::find_optional(path)? {
+        Some(root) => store::scan(&root)?,
+        None => Vec::new(),
+    };
+    documents.extend(store::scan_global()?);
+    Ok(documents)
 }
 
 fn search_rank(document: &store::Document, query: &str) -> Option<u8> {
@@ -355,17 +426,19 @@ fn metadata_text(document: &store::Document) -> String {
         document.related.clone(),
         document.supersedes.clone(),
         document.superseded_by.clone(),
+        document.source_record.clone().into_iter().collect(),
     ]
     .concat()
     .join("\n")
 }
 
 fn print_document_summary(document: &store::Document, query: Option<&str>) {
-    let label = document
+    let kind = document
         .status
         .as_deref()
         .map(|status| format!("{} / {status}", document.kind))
         .unwrap_or_else(|| document.kind.clone());
+    let label = format!("{} {kind}", document.scope.as_str());
     println!("{} [{label}]", document.heading);
     println!("  id: {}", document.id);
     if let Some(excerpt) = query.and_then(|query| matching_excerpt(document, query)) {

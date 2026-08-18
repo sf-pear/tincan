@@ -2,16 +2,18 @@ use std::path::{Path, PathBuf};
 
 pub fn find(path: &Path) -> Result<PathBuf, String> {
     let start = canonical_directory(path)?;
-    for candidate in start.ancestors() {
-        if candidate.join(".tincan/config.toml").is_file() {
-            return Ok(candidate.to_path_buf());
-        }
-    }
-    Err(format!(
-        "{} is not inside a Tincan workspace; run `tincan init {}`",
-        start.display(),
-        start.display()
-    ))
+    find_from(&start).ok_or_else(|| {
+        format!(
+            "{} is not inside a Tincan workspace; run `tincan init {}`",
+            start.display(),
+            start.display()
+        )
+    })
+}
+
+pub fn find_optional(path: &Path) -> Result<Option<PathBuf>, String> {
+    let start = canonical_directory(path)?;
+    Ok(find_from(&start))
 }
 
 pub fn target(path: &Path) -> Result<PathBuf, String> {
@@ -26,6 +28,13 @@ fn canonical_directory(path: &Path) -> Result<PathBuf, String> {
         return Err(format!("{} is not a directory", path.display()));
     }
     Ok(path)
+}
+
+fn find_from(start: &Path) -> Option<PathBuf> {
+    start
+        .ancestors()
+        .find(|candidate| candidate.join(".tincan/config.toml").is_file())
+        .map(Path::to_path_buf)
 }
 
 #[cfg(test)]
@@ -47,6 +56,24 @@ mod tests {
         fs::write(root.join(".tincan/config.toml"), "version = 2\n").unwrap();
 
         assert_eq!(find(&nested).unwrap(), root.canonicalize().unwrap());
+        assert_eq!(
+            find_optional(&nested).unwrap(),
+            Some(root.canonicalize().unwrap())
+        );
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn optionally_reports_that_no_workspace_exists() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let root = std::env::temp_dir().join(format!("tincan-no-workspace-{unique}"));
+        fs::create_dir_all(&root).unwrap();
+
+        assert_eq!(find_optional(&root).unwrap(), None);
+
         fs::remove_dir_all(root).unwrap();
     }
 }

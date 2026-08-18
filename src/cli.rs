@@ -5,16 +5,41 @@ use uuid::Uuid;
 pub enum Command {
     Help,
     Version,
-    Init { repo: PathBuf },
-    Summary { repo: PathBuf, verbose: bool },
+    Init {
+        repo: PathBuf,
+    },
+    Summary {
+        repo: PathBuf,
+        verbose: bool,
+    },
     Record(RecordArgs),
     Journal(JournalArgs),
-    Plan { repo: PathBuf },
-    Resume { repo: PathBuf },
-    Search { repo: PathBuf, query: String },
-    Show { repo: PathBuf, id: String },
-    Changes { repo: PathBuf },
-    SkillInstall { path: Option<PathBuf>, force: bool },
+    Plan {
+        repo: PathBuf,
+    },
+    Resume {
+        repo: PathBuf,
+    },
+    Search {
+        repo: PathBuf,
+        query: String,
+    },
+    Show {
+        repo: PathBuf,
+        id: String,
+    },
+    Lift {
+        repo: PathBuf,
+        id: String,
+        from: PathBuf,
+    },
+    Changes {
+        repo: PathBuf,
+    },
+    SkillInstall {
+        path: Option<PathBuf>,
+        force: bool,
+    },
     SkillStatus,
 }
 
@@ -110,6 +135,7 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
                 id,
             })
         }
+        "lift" => parse_lift(&args[1..]),
         "changes" => {
             let values = Flags::parse(&args[1..])?;
             values.ensure_only(&["directory"])?;
@@ -124,6 +150,27 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "skill" => parse_skill(&args[1..]),
         other => Err(format!("unknown command: {other}\n\n{}", help())),
     }
+}
+
+fn parse_lift(args: &[String]) -> Result<Command, String> {
+    let values = Flags::parse(args)?;
+    values.ensure_only(&["directory", "from"])?;
+    values.ensure_at_most_one(&["directory", "from"])?;
+    if values.positionals.len() != 1 {
+        return Err("lift requires exactly one project learning ID".to_string());
+    }
+    let id = values.positionals[0].clone();
+    if Uuid::parse_str(&id).is_err() {
+        return Err(format!("lift requires a valid UUID: {id}"));
+    }
+    let from = values.one("from").map(PathBuf::from).ok_or_else(|| {
+        "lift requires --from <MARKDOWN_FILE>; use --from - for stdin".to_string()
+    })?;
+    Ok(Command::Lift {
+        repo: values.directory()?,
+        id,
+        from,
+    })
 }
 
 fn parse_journal(args: &[String]) -> Result<Command, String> {
@@ -390,13 +437,15 @@ COMMANDS
                                 Count stored memory; optionally list headings
   plan [-d|--directory PATH]    Print the living project plan
   journal [OPTIONS]             Update today's concise work record
-  resume [-d|--directory PATH]  Print the latest daily journal
+  resume [-d|--directory PATH]  Print the living plan and latest journal
   decide STATEMENT [OPTIONS]    Create an accepted decision record
   learn STATEMENT [OPTIONS]     Create an evidence-supported learning record
   search [-d|--directory PATH] QUERY
                                 List matching records and their IDs
   show [-d|--directory PATH] RECORD_ID
                                 Print one record; use an ID returned by search
+  lift [-d|--directory PATH] RECORD_ID --from MARKDOWN_FILE
+                                Save an approved generalized global learning
   changes [-d|--directory PATH] Show memory related to Git-changed paths
   skill install [OPTIONS]       Install the bundled Agent Skill
   skill status                  Check detected Agent Skill installations
@@ -408,11 +457,17 @@ WORKSPACES AND FILES
   A workspace may contain zero, one, or several Git repositories. -d is the
   short form of --directory. Tincan writes only under .tincan/ and keeps it out
   of normal Git tracking when the workspace is inside a repository.
+  Global learnings live under ~/.tincan/global/learnings. Set TINCAN_HOME to
+  relocate the personal .tincan directory. Search and show include global
+  learnings, including when run outside a project workspace.
 
 RECORD IDS
   Decisions and learnings receive stable UUID v7 IDs such as
   019c4ea8-7e42-7b31-a211-8df9357d747c. `decide` and `learn` print the new ID;
-  `search` prints matching IDs. `show` is a convenience for agents and scripts.
+  `search` prints matching project and global IDs. `show` is a convenience for
+  agents and scripts. `lift` reads an approved, generalized Markdown body from
+  --from (or stdin with --from -), gives it a new ID, and preserves its source
+  learning as provenance.
 
 EXAMPLES
   tincan init .
@@ -422,6 +477,7 @@ EXAMPLES
   tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
   tincan search "markdown"
   tincan show 019c4ea8-7e42-7b31-a211-8df9357d747c
+  tincan lift 019c4ea8-7e42-7b31-a211-8df9357d747c --from global-learning.md
 
 JOURNAL OPTIONS
   tincan journal [-d|--directory PATH] [--done TEXT ...]
@@ -433,10 +489,12 @@ SKILL INSTALL
   tincan skill install [--path SKILLS_DIRECTORY] [--force]
 
   Without --path, detect user-wide Agent Skills harnesses and select all by
-  default. Use arrow keys to move, Space to select or unselect, A to toggle all
-  or none, Enter to continue, and Escape to cancel. Every installation requires
-  answering a final Y/n confirmation; pressing Enter accepts. Use --path for an
-  explicit, non-interactive or project-local destination.
+  default. Each choice says whether Tincan will be installed or updated;
+  already-current installations are omitted. Use arrow keys to move, Space to
+  select or unselect, A to toggle all or none, Enter to continue, and Escape to
+  cancel. Every installation requires answering a final Y/n confirmation;
+  pressing Enter accepts. Use --path for an explicit, non-interactive or
+  project-local destination.
 
 SKILL STATUS
   tincan skill status
@@ -652,6 +710,34 @@ mod tests {
     }
 
     #[test]
+    fn parses_lift_with_a_project_learning_id() {
+        let id = "019c4ea8-7e42-7b31-a211-8df9357d747c";
+        assert_eq!(
+            parse(
+                ["lift", id, "--directory", "project", "--from", "global.md",]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::Lift {
+                repo: PathBuf::from("project"),
+                id: id.to_string(),
+                from: PathBuf::from("global.md"),
+            }
+        );
+        assert!(
+            parse(["lift", "not-an-id"].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("valid UUID")
+        );
+        assert!(
+            parse(["lift", id].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("requires --from")
+        );
+    }
+
+    #[test]
     fn rejects_extra_arguments_and_unknown_options() {
         assert_eq!(
             parse(["search", "one", "two"].map(str::to_string).to_vec()).unwrap_err(),
@@ -685,6 +771,7 @@ mod tests {
         assert!(help().contains("nearest parent directory"));
         assert!(help().contains("UUID v7 IDs"));
         assert!(help().contains("tincan decide STATEMENT"));
+        assert!(help().contains("tincan lift"));
         assert!(!help().contains("record decision"));
     }
 }

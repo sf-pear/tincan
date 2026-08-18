@@ -1,4 +1,4 @@
 interface:
   display_name: "Tincan"
   short_description: "Journal work and preserve durable reasoning"
-  default_prompt: "Use $tincan to offer initialization when needed, resume and journal meaningful development work, preserve accepted decisions, and record evidence-supported learnings in this checkout."
+  default_prompt: "Use $tincan to offer initialization when needed, resume and journal meaningful development work, preserve accepted decisions, record evidence-supported project learnings, and lift user-approved global learnings."

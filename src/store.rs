@@ -7,7 +7,22 @@ const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
 const CONFIG: &str = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
 const PLAN: &str = "# Plan\n\n## Planned\n\n<!-- none -->\n\n## Ideas\n\n<!-- none -->\n";
 
-#[derive(Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Scope {
+    Project,
+    Global,
+}
+
+impl Scope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Project => "project",
+            Self::Global => "global",
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub struct Document {
     pub path: PathBuf,
     pub id: String,
@@ -20,6 +35,8 @@ pub struct Document {
     pub related: Vec<String>,
     pub supersedes: Vec<String>,
     pub superseded_by: Vec<String>,
+    pub source_record: Option<String>,
+    pub scope: Scope,
 }
 
 pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
@@ -297,13 +314,88 @@ pub fn scan(repo: &Path) -> Result<Vec<Document>, String> {
     let root = require(repo)?;
     let mut documents = Vec::new();
     for directory in DIRECTORIES {
-        collect_documents(&root.join(directory), &mut documents)?;
+        collect_documents(&root.join(directory), Scope::Project, &mut documents)?;
     }
     documents.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(documents)
 }
 
-fn collect_documents(path: &Path, output: &mut Vec<Document>) -> Result<(), String> {
+pub fn scan_global() -> Result<Vec<Document>, String> {
+    let directory = global_learnings_directory()?;
+    if !directory.is_dir() {
+        return Ok(Vec::new());
+    }
+    let mut documents = Vec::new();
+    collect_documents(&directory, Scope::Global, &mut documents)?;
+    if let Some(document) = documents
+        .iter()
+        .find(|document| document.kind != "learning")
+    {
+        return Err(format!(
+            "invalid global record in {}: only learnings are supported",
+            document.path.display()
+        ));
+    }
+    documents.sort_by(|left, right| left.path.cmp(&right.path));
+    Ok(documents)
+}
+
+pub fn write_global_learning(
+    source: &Document,
+    id: &str,
+    created_at: &str,
+    source_workspace: &str,
+    body: &str,
+) -> Result<PathBuf, String> {
+    if source.kind != "learning" || source.scope != Scope::Project {
+        return Err("only a project learning can be lifted".to_string());
+    }
+    let directory = global_learnings_directory()?;
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let path = directory.join(format!("{id}.md"));
+    let content = render_global_learning(source, id, created_at, source_workspace, body);
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&path)
+        .map_err(|error| {
+            if error.kind() == std::io::ErrorKind::AlreadyExists {
+                format!("global learning already exists: {}", path.display())
+            } else {
+                format!("cannot write {}: {error}", path.display())
+            }
+        })?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    Ok(path)
+}
+
+pub fn validate_global_learning_body(body: &str) -> Result<(), String> {
+    let body = body.trim();
+    if body.starts_with("---") {
+        return Err(
+            "global learning draft must contain Markdown body only; remove YAML frontmatter"
+                .to_string(),
+        );
+    }
+    let first = body
+        .lines()
+        .find(|line| !line.trim().is_empty())
+        .unwrap_or_default();
+    if first
+        .strip_prefix("# ")
+        .is_none_or(|heading| heading.trim().is_empty())
+    {
+        return Err("global learning draft must start with a non-empty H1 heading".to_string());
+    }
+    if body.lines().filter(|line| line.starts_with("# ")).count() != 1 {
+        return Err("global learning draft must contain exactly one H1 heading".to_string());
+    }
+    Ok(())
+}
+
+fn collect_documents(path: &Path, scope: Scope, output: &mut Vec<Document>) -> Result<(), String> {
     for entry in
         fs::read_dir(path).map_err(|error| format!("cannot read {}: {error}", path.display()))?
     {
@@ -314,7 +406,9 @@ fn collect_documents(path: &Path, output: &mut Vec<Document>) -> Result<(), Stri
         }
         let text = fs::read_to_string(&file_path)
             .map_err(|error| format!("cannot read {}: {error}", file_path.display()))?;
-        output.push(parse_document(file_path, text)?);
+        let mut document = parse_document(file_path, text)?;
+        document.scope = scope;
+        output.push(document);
     }
     Ok(())
 }
@@ -352,6 +446,14 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
                     ));
                 }
             }
+        }
+        if let Some(source_record) = scalar(&text, "source_record")
+            && uuid::Uuid::parse_str(&source_record).is_err()
+        {
+            return Err(format!(
+                "invalid frontmatter in {}: source_record must be a UUID",
+                path.display()
+            ));
         }
     }
     let body = markdown_body(&text);
@@ -391,6 +493,8 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
         related: yaml_list(&text, "related"),
         supersedes: yaml_list(&text, "supersedes"),
         superseded_by: yaml_list(&text, "superseded_by"),
+        source_record: scalar(&text, "source_record"),
+        scope: Scope::Project,
         path,
     })
 }
@@ -433,21 +537,74 @@ pub fn active_decisions(repo: &Path, ids: &[String]) -> Result<Vec<Document>, St
                 document.status.as_deref().unwrap_or("no status")
             ));
         }
-        decisions.push(Document {
-            path: document.path.clone(),
-            id: document.id.clone(),
-            heading: document.heading.clone(),
-            body: document.body.clone(),
-            kind: document.kind.clone(),
-            status: document.status.clone(),
-            files: document.files.clone(),
-            topics: document.topics.clone(),
-            related: document.related.clone(),
-            supersedes: document.supersedes.clone(),
-            superseded_by: document.superseded_by.clone(),
-        });
+        decisions.push(document.clone());
     }
     Ok(decisions)
+}
+
+fn global_learnings_directory() -> Result<PathBuf, String> {
+    Ok(personal_tincan_root()?.join("global").join("learnings"))
+}
+
+fn personal_tincan_root() -> Result<PathBuf, String> {
+    let explicit = nonempty_env_path("TINCAN_HOME");
+    let user_profile = nonempty_env_path("USERPROFILE");
+    let home = nonempty_env_path("HOME");
+    personal_tincan_root_from(explicit, user_profile, home).ok_or_else(|| {
+        "cannot locate global Tincan storage; set TINCAN_HOME, USERPROFILE, or HOME".to_string()
+    })
+}
+
+fn nonempty_env_path(name: &str) -> Option<PathBuf> {
+    std::env::var_os(name)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn personal_tincan_root_from(
+    explicit: Option<PathBuf>,
+    user_profile: Option<PathBuf>,
+    home: Option<PathBuf>,
+) -> Option<PathBuf> {
+    explicit.or_else(|| user_profile.or(home).map(|path| path.join(".tincan")))
+}
+
+fn render_global_learning(
+    source: &Document,
+    id: &str,
+    created_at: &str,
+    source_workspace: &str,
+    body: &str,
+) -> String {
+    let mut output = String::new();
+    output.push_str("---\n");
+    output.push_str(&format!("id: {}\n", crate::util::yaml_string(id)));
+    output.push_str("type: \"learning\"\n");
+    output.push_str("scope: \"global\"\n");
+    output.push_str(&format!(
+        "created_at: {}\n",
+        crate::util::yaml_string(created_at)
+    ));
+    output.push_str(&format!(
+        "source_workspace: {}\n",
+        crate::util::yaml_string(source_workspace)
+    ));
+    output.push_str(&format!(
+        "source_record: {}\n",
+        crate::util::yaml_string(&source.id)
+    ));
+    output.push_str("files:\n");
+    output.push_str("topics:\n");
+    for topic in &source.topics {
+        output.push_str(&format!("  - {}\n", crate::util::yaml_string(topic)));
+    }
+    output.push_str("related:\n");
+    output.push_str("supersedes:\n");
+    output.push_str("superseded_by:\n");
+    output.push_str("---\n\n");
+    output.push_str(body.trim());
+    output.push('\n');
+    output
 }
 
 pub fn mark_superseded(decisions: &[Document], replacement_id: &str) -> Result<(), String> {
@@ -604,6 +761,7 @@ mod tests {
         assert!(document.body.contains("Detailed renderer evidence."));
         assert_eq!(document.files, vec!["src/a.rs"]);
         assert_eq!(document.topics, vec!["performance"]);
+        assert_eq!(document.scope, Scope::Project);
     }
 
     #[test]
@@ -701,6 +859,54 @@ mod tests {
         }
 
         fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn chooses_explicit_or_home_relative_personal_storage() {
+        let explicit = PathBuf::from("custom-tincan");
+        let profile = PathBuf::from("profile");
+        let home = PathBuf::from("home");
+
+        assert_eq!(
+            personal_tincan_root_from(
+                Some(explicit.clone()),
+                Some(profile.clone()),
+                Some(home.clone())
+            ),
+            Some(explicit)
+        );
+        assert_eq!(
+            personal_tincan_root_from(None, Some(profile.clone()), Some(home.clone())),
+            Some(profile.join(".tincan"))
+        );
+        assert_eq!(
+            personal_tincan_root_from(None, None, Some(home.clone())),
+            Some(home.join(".tincan"))
+        );
+        assert_eq!(personal_tincan_root_from(None, None, None), None);
+    }
+
+    #[test]
+    fn validates_prepared_global_learning_markdown() {
+        validate_global_learning_body(
+            "# Prefer presentation-boundary normalization\n\nKeep canonical paths internally.",
+        )
+        .unwrap();
+        assert!(
+            validate_global_learning_body("Body without a heading")
+                .unwrap_err()
+                .contains("must start with")
+        );
+        assert!(
+            validate_global_learning_body("---\nid: owned\n---\n\n# Heading")
+                .unwrap_err()
+                .contains("remove YAML frontmatter")
+        );
+        assert!(
+            validate_global_learning_body("# First\n\n# Second")
+                .unwrap_err()
+                .contains("exactly one H1")
+        );
     }
 
     #[test]

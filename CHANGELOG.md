@@ -6,6 +6,27 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-08-18
+
+### Added
+
+- Add user-approved global learnings under `~/.tincan/global/learnings/`, with
+  `tincan lift UUID --from FILE` writing a prepared generalized Markdown body
+  and preserving source provenance.
+- Include global learnings in `search` and `show`, including outside a project.
+
+### Changed
+
+- Make `resume` print the living plan before the latest journal so agents need
+  one startup command instead of two.
+- Stop instructing agents to run `tincan --help` as a startup preflight, avoid
+  repeated startup work in one task, and teach the bundled skill to request
+  approval before lifting a global learning.
+- Label skill-picker destinations as installs or updates, show the complete
+  destination path, and omit installations that are already current.
+- Require agents to show the generalized global-learning draft before approval,
+  and check for derived global records when correcting a project learning.
+
 ## [0.4.0] - 2026-08-11
 
 ### Added

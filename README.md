@@ -9,6 +9,7 @@ When you return to a project, Tincan helps answer:
 - What is still open?
 - What should happen next?
 - What decisions must not be overlooked?
+- What did another project already teach us?
 
 Agent-assisted development moves fast. Context gets lost between projects,
 features, sessions, and agents. That wastes time and causes regressions when
@@ -20,6 +21,7 @@ Tincan keeps a small record of what matters:
 - **Journal:** meaningful progress, open questions, plans, and next steps.
 - **Decision:** an accepted choice that should guide future work.
 - **Learning:** an evidence-supported conclusion worth remembering.
+- **Global learning:** a user-approved learning available across projects.
 
 Tincan is designed to be maintained by the coding agent as work happens. With
 the bundled skill installed, the agent records meaningful progress, accepted
@@ -30,10 +32,11 @@ Nothing runs in the background or records everything automatically. The agent
 uses Tincan deliberately to keep the small amount of context worth carrying
 forward.
 
-Everything is stored as plain Markdown inside the project. There is no database,
-background service, graph, or attempt to record every action. Just a simple way
-to stay sane given the sheer velocity of development and the amount of decisions
-we make every day.
+Everything is stored as plain Markdown. Project memory stays inside the project,
+while approved global learnings live under `~/.tincan/global/learnings/`. There
+is no database, background service, graph, or attempt to record every action.
+Just a simple way to stay sane given the sheer velocity of development and the
+amount of decisions we make every day.
 
 ## Install
 
@@ -57,14 +60,13 @@ updates separately from those already current.
 tincan init C:\path\to\workspace
 cd C:\path\to\workspace
 
-tincan plan
+tincan resume
 tincan decide "Load full media details on demand" --file web/app/page.tsx
 tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
 tincan journal --done "Implemented the compact gallery read model" `
   --planned "Add the stale-response regression test" `
   --next "Start with the stale-response test"
 
-tincan resume
 tincan search "gallery"
 tincan summary
 tincan changes
@@ -76,6 +78,8 @@ contain zero, one, or several Git repositories. Pass `-d <path>` or
 
 ## Storage
 
+Project memory:
+
 ```text
 .tincan/
 |-- config.toml
@@ -85,9 +89,41 @@ contain zero, one, or several Git repositories. Pass `-d <path>` or
 `-- journal/
 ```
 
+User-approved global learnings:
+
+```text
+~/.tincan/
+`-- global/
+    `-- learnings/
+```
+
 When the workspace is inside Git, Tincan excludes `.tincan/` through Git's
 local exclude file. A non-Git parent is already outside its nested repositories.
 Markdown is canonical, and people or agents can edit record bodies and the plan
-directly.
+directly. After an agent shows a generalized Markdown draft and receives
+approval, `tincan lift UUID --from FILE` writes it into
+`~/.tincan/global/learnings/` with a new ID and source provenance. `search` and
+`show` include global learnings automatically, even when run outside a project.
+Searching a project learning's UUID also finds global learnings derived from it.
+Set `TINCAN_HOME` to relocate the personal `.tincan` directory.
+
+## Global learnings
+
+When a project learning is likely to help elsewhere, the agent prepares and
+shows a standalone generalized Markdown draft. After approval, save that draft
+without YAML frontmatter and lift it:
+
+```powershell
+tincan lift <project-learning-id> --from global-learning.md
+```
+
+The draft must begin with exactly one non-empty H1. Use `--from -` to read it
+from stdin instead of a file. Tincan gives the global learning its own UUID and
+records the project learning in `source_record`; the detailed project record is
+left unchanged.
+
+If later work corrects a project learning, searching its UUID finds global
+learnings derived from it so the agent can ask whether they also need revision.
+Corrections never propagate automatically.
 
 See [the user guide](docs/USER_GUIDE.md) or run `tincan --help`.

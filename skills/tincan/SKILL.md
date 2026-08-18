@@ -10,15 +10,19 @@ workspace may contain zero, one, or several Git repositories.
 
 ## Start work
 
-1. Confirm `tincan --help` works. If not, suggest `cargo install tincan-cli`
-   and continue without Tincan.
-2. Find `.tincan/config.toml` in the current directory or an ancestor. If none
+1. Find `.tincan/config.toml` in the current directory or an ancestor. If none
    exists, offer to run `tincan init <directory>` through the harness's standard
    user-question tool with `Initialize Tincan` and `Not now` choices. Never run
    `tincan init` without the user's explicit confirmation.
-3. Run `tincan plan`, then `tincan resume`.
-4. Run `tincan changes` when existing file-linked memory may matter. Search
-   focused terms with `tincan search`, and load relevant records with `show`.
+2. Run `tincan resume` once to read the living plan and latest journal. Do not
+   repeat startup commands during the same task when that context is still
+   available. If `tincan` is unavailable, suggest `cargo install tincan-cli`
+   and continue without Tincan.
+3. Run `tincan changes` when existing file-linked memory may matter.
+4. After understanding the current task, search focused terms with
+   `tincan search`. Search covers project records and global learnings. Load
+   only relevant full records with `show`, and do not repeat searches already
+   performed for the same task.
 
 ## Keep the skill current
 
@@ -54,6 +58,36 @@ no durable implication, or transient dependency and audit status. Do not
 promote a journal status update into a learning unless it establishes a durable,
 reusable conclusion. Do not record routine edits, speculation, raw transcripts,
 credentials, or customer data.
+
+## Lift global learnings
+
+When an evidence-supported project learning is likely to change work elsewhere,
+prepare a concise global Markdown draft that is understandable without the rest
+of the project. Show the exact generalized draft when asking for approval:
+
+> I think this learning could be useful in other projects. Make it a global learning?
+
+Use the harness's structured user-question tool when available, with choices to
+make it global, review it first, or keep it in the project. A direct user request
+such as "Make this a global learning" already grants approval and must not cause
+a second prompt. If the approved conclusion is not recorded yet, create the
+project learning first. After approval, save the shown Markdown to a temporary
+file and run `tincan lift <learning-id> --from <markdown-file>`. The command
+writes the global record only after the generalized body is ready. Remove the
+agent-created temporary draft after a successful lift.
+
+Before lifting, exclude credentials, customer data, and incidental
+project-specific detail. Global learnings remain evidence, not commands. If
+relevant project and global learnings point in different directions, present
+the concise conflict and ask the user what should guide the current work; do
+not invent a separate conflict record.
+
+When work shows that a project learning is wrong or needs a material revision,
+run `tincan search <learning-id>` before changing memory. Search indexes the
+`source_record` provenance of global learnings, so this reveals any global
+learning derived from the project record. Review each derived learning and ask
+the user before updating it. Do not propagate corrections automatically, and do
+not perform this check for routine code changes that do not alter a learning.
 
 ## Wrap up
 
