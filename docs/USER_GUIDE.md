@@ -53,7 +53,8 @@ shows the complete Tincan skill path, and omits installations already current.
 | `search QUERY` | Search project records and global learnings. |
 | `show UUID` | Print one complete project or global record. |
 | `lift UUID --from FILE` | Save an approved generalized global learning. |
-| `summary [PATH]` | Count stored memory; `--verbose` lists headings and paths. |
+| `review` | Show historical coverage and yearly record counts. |
+| `review SCOPE` | Print or save deterministic context for a retrospective. |
 | `changes` | Match changed files across nested Git repos to records linked by `--file`. |
 | `skill install` | Install the agent workflow into selected harnesses. |
 | `skill status` | Check whether detected Agent Skill installations are current. |
@@ -82,6 +83,31 @@ them in the journal. Review the plan at the same boundary, but change it only
 when an outcome or idea was completed, invalidated, refined, or revealed.
 
 Run `tincan --help` for complete syntax.
+
+## Review
+
+`review` keeps historical selection useful with or without an agent. With no
+scope it shows the first and last recorded dates plus journal-day, decision,
+and learning counts for each year. Explicit scopes return readable Markdown
+from the matching project records without calling a model or storing a derived
+summary.
+
+```powershell
+tincan review
+tincan review all
+tincan review --year 2025
+tincan review month 8 --year 2025
+tincan review quarter 3 --year 2025
+tincan review half 2 --year 2025 --output review-2025-h2.md
+```
+
+Month, quarter, and half-year selectors use the current calendar period when
+their number is omitted and the current year when `--year` is omitted. Output
+prints to the terminal by default. `--output FILE` creates a Markdown file and
+refuses to replace an existing file unless `--force` is also provided.
+
+`review` replaces the former `summary` command. Use `search` and `show` when
+looking for a specific record rather than a calendar period.
 
 ## Global learnings
 

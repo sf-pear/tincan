@@ -30,6 +30,98 @@ fn invalid_input_fails_and_writes_the_error_to_stderr() {
 }
 
 #[test]
+fn review_replaces_summary_and_writes_selected_context_safely() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("tincan-cli-review-{unique}"));
+    fs::create_dir_all(&workspace).unwrap();
+    let init = tincan().arg("init").arg(&workspace).output().unwrap();
+    assert!(init.status.success());
+    fs::write(
+        workspace.join(".tincan/journal/2025-08-05.md"),
+        "---\nid: \"journal-2025-08-05\"\ntype: \"journal\"\ncreated_at: \"2025-08-05T09:00:00+02:00\"\n---\n\n# 2025-08-05\n\n## Done\n\n- Shipped useful review context\n\n## Planned\n\n<!-- none -->\n\n## Open questions\n\n<!-- none -->\n\n## Next\n\n<!-- none -->\n",
+    )
+    .unwrap();
+    fs::write(
+        workspace.join(
+            ".tincan/decisions/019fd6d9-1ff8-7082-9f86-2b7d89712a57.md",
+        ),
+        "---\nid: \"019fd6d9-1ff8-7082-9f86-2b7d89712a57\"\ntype: \"decision\"\nstatus: \"active\"\ncreated_at: \"2025-09-10T09:00:00+02:00\"\nfiles:\ntopics:\nrelated:\nsupersedes:\nsuperseded_by:\n---\n\n# Keep review deterministic\n",
+    )
+    .unwrap();
+
+    let overview = tincan()
+        .current_dir(&workspace)
+        .arg("review")
+        .output()
+        .unwrap();
+    assert!(
+        overview.status.success(),
+        "{}",
+        String::from_utf8_lossy(&overview.stderr)
+    );
+    let overview_stdout = String::from_utf8(overview.stdout).unwrap();
+    assert!(overview_stdout.contains("Review history: 2025-08-05 through 2025-09-10"));
+    assert!(overview_stdout.contains("2025              1           1           0"));
+
+    let destination = workspace.join("review-2025-q3.md");
+    let selected = tincan()
+        .current_dir(&workspace)
+        .args(["review", "quarter", "3", "--year", "2025", "--output"])
+        .arg(&destination)
+        .output()
+        .unwrap();
+    assert!(selected.status.success());
+    let content = fs::read_to_string(&destination).unwrap();
+    assert!(content.contains("# Tincan review: 2025 Q3"));
+    assert!(content.contains("Shipped useful review context"));
+    assert!(content.contains("Keep review deterministic"));
+    assert!(!content.contains("<!-- none -->"));
+
+    let protected = tincan()
+        .current_dir(&workspace)
+        .args(["review", "--year", "2025", "--output"])
+        .arg(&destination)
+        .output()
+        .unwrap();
+    assert!(!protected.status.success());
+    assert!(
+        String::from_utf8(protected.stderr)
+            .unwrap()
+            .contains("use --force to replace it")
+    );
+
+    let replaced = tincan()
+        .current_dir(&workspace)
+        .args(["review", "--year", "2025", "--output"])
+        .arg(&destination)
+        .arg("--force")
+        .output()
+        .unwrap();
+    assert!(replaced.status.success());
+    assert!(
+        fs::read_to_string(&destination)
+            .unwrap()
+            .contains("# Tincan review: 2025")
+    );
+
+    let removed = tincan()
+        .current_dir(&workspace)
+        .arg("summary")
+        .output()
+        .unwrap();
+    assert!(!removed.status.success());
+    assert!(
+        String::from_utf8(removed.stderr)
+            .unwrap()
+            .contains("summary was replaced by review")
+    );
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
 fn one_workspace_operates_across_two_nested_git_repositories() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

@@ -8,10 +8,7 @@ pub enum Command {
     Init {
         repo: PathBuf,
     },
-    Summary {
-        repo: PathBuf,
-        verbose: bool,
-    },
+    Review(ReviewArgs),
     Record(RecordArgs),
     Journal(JournalArgs),
     Plan {
@@ -53,6 +50,24 @@ pub struct JournalArgs {
 }
 
 #[derive(Debug, PartialEq)]
+pub struct ReviewArgs {
+    pub repo: PathBuf,
+    pub scope: ReviewScope,
+    pub year: Option<i32>,
+    pub output: Option<PathBuf>,
+    pub force: bool,
+}
+
+#[derive(Debug, PartialEq)]
+pub enum ReviewScope {
+    Overview,
+    All,
+    Month(Option<u32>),
+    Quarter(Option<u32>),
+    Half(Option<u32>),
+}
+
+#[derive(Debug, PartialEq)]
 pub struct RecordArgs {
     pub kind: String,
     pub repo: PathBuf,
@@ -75,7 +90,11 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "init" => Ok(Command::Init {
             repo: positional_repo(&args[1..])?,
         }),
-        "summary" => parse_summary(&args[1..]),
+        "summary" => Err(
+            "summary was replaced by review; run `tincan review` to inspect recorded history"
+                .to_string(),
+        ),
+        "review" => parse_review(&args[1..]),
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
@@ -196,21 +215,88 @@ fn parse_journal(args: &[String]) -> Result<Command, String> {
     }))
 }
 
-fn parse_summary(args: &[String]) -> Result<Command, String> {
+fn parse_review(args: &[String]) -> Result<Command, String> {
     let values = Flags::parse(args)?;
-    values.ensure_only(&["verbose"])?;
-    values.ensure_at_most_one(&["verbose"])?;
-    if values.positionals.len() > 1 {
-        return Err("summary accepts at most one repository path".to_string());
+    values.ensure_only(&["directory", "year", "output", "force"])?;
+    values.ensure_at_most_one(&["directory", "year", "output", "force"])?;
+    let year = values
+        .one("year")
+        .map(|value| {
+            if value.len() != 4 || !value.chars().all(|character| character.is_ascii_digit()) {
+                return Err(format!("--year requires a four-digit year: {value}"));
+            }
+            value
+                .parse::<i32>()
+                .map_err(|_| format!("--year requires a four-digit year: {value}"))
+                .and_then(|year| {
+                    if (1..=9999).contains(&year) {
+                        Ok(year)
+                    } else {
+                        Err(format!("--year requires a year from 0001 to 9999: {value}"))
+                    }
+                })
+        })
+        .transpose()?;
+    if values.present("force") && !values.present("output") {
+        return Err("--force requires --output <FILE>".to_string());
     }
-    Ok(Command::Summary {
-        repo: values
-            .positionals
-            .first()
-            .map(PathBuf::from)
-            .map(Ok)
-            .unwrap_or_else(|| std::env::current_dir().map_err(|error| error.to_string()))?,
-        verbose: values.present("verbose"),
+    let scope = match values.positionals.as_slice() {
+        [] if year.is_some() => ReviewScope::All,
+        [] => ReviewScope::Overview,
+        [scope] if scope == "all" => {
+            if year.is_some() {
+                return Err("review all cannot be combined with --year".to_string());
+            }
+            ReviewScope::All
+        }
+        [scope] if matches!(scope.as_str(), "month" | "quarter" | "half") => {
+            review_period(scope, None)?
+        }
+        [scope, value] if matches!(scope.as_str(), "month" | "quarter" | "half") => {
+            review_period(scope, Some(value))?
+        }
+        _ => {
+            return Err(
+                "review accepts `all`, `month [NUMBER]`, `quarter [NUMBER]`, or `half [NUMBER]`"
+                    .to_string(),
+            );
+        }
+    };
+    Ok(Command::Review(ReviewArgs {
+        repo: values.directory()?,
+        scope,
+        year,
+        output: values.one("output").map(PathBuf::from),
+        force: values.present("force"),
+    }))
+}
+
+fn review_period(scope: &str, value: Option<&String>) -> Result<ReviewScope, String> {
+    let number = value
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|_| format!("review {scope} requires a number: {value}"))
+        })
+        .transpose()?;
+    let maximum = match scope {
+        "month" => 12,
+        "quarter" => 4,
+        "half" => 2,
+        _ => unreachable!(),
+    };
+    if let Some(number) = number
+        && !(1..=maximum).contains(&number)
+    {
+        return Err(format!(
+            "review {scope} requires a number from 1 to {maximum}: {number}"
+        ));
+    }
+    Ok(match scope {
+        "month" => ReviewScope::Month(number),
+        "quarter" => ReviewScope::Quarter(number),
+        "half" => ReviewScope::Half(number),
+        _ => unreachable!(),
     })
 }
 
@@ -433,8 +519,7 @@ USAGE
 
 COMMANDS
   init [DIRECTORY]              Initialize private .tincan/ storage
-  summary [DIRECTORY] [-v|--verbose]
-                                Count stored memory; optionally list headings
+  review [SCOPE] [OPTIONS]      Inspect history or select retrospective context
   plan [-d|--directory PATH]    Print the living project plan
   journal [OPTIONS]             Update today's concise work record
   resume [-d|--directory PATH]  Print the living plan and latest journal
@@ -472,6 +557,9 @@ RECORD IDS
 EXAMPLES
   tincan init .
   tincan plan
+  tincan review
+  tincan review quarter 3 --year 2025
+  tincan review all --output review.md
   tincan journal --done "Implemented deterministic path matching"
   tincan decide "Keep Markdown canonical" --topic storage
   tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
@@ -484,6 +572,19 @@ JOURNAL OPTIONS
                  [--planned TEXT ...] [--question TEXT ...] [--next TEXT ...]
 
   At least one journal bullet is required. Each bullet option is repeatable.
+
+REVIEW
+  tincan review [-d|--directory PATH]
+  tincan review all [--output FILE] [--force]
+  tincan review --year YEAR [--output FILE] [--force]
+  tincan review month [NUMBER] [--year YEAR] [--output FILE] [--force]
+  tincan review quarter [NUMBER] [--year YEAR] [--output FILE] [--force]
+  tincan review half [NUMBER] [--year YEAR] [--output FILE] [--force]
+
+  With no scope, show recorded date coverage and yearly counts. Missing period
+  numbers and years use the current calendar period. `all` explicitly selects
+  every project journal, decision, and learning. Output files are created
+  without overwriting unless --force is provided.
 
 SKILL INSTALL
   tincan skill install [--path SKILLS_DIRECTORY] [--force]
@@ -654,25 +755,74 @@ mod tests {
     }
 
     #[test]
-    fn parses_summary_without_an_inspect_alias() {
+    fn parses_review_scopes_and_rejects_removed_summary() {
         assert!(matches!(
-            parse(vec!["summary".to_string()]).unwrap(),
-            Command::Summary { verbose: false, .. }
-        ));
-        assert!(matches!(
-            parse(["summary", "-v"].map(str::to_string).to_vec()).unwrap(),
-            Command::Summary { verbose: true, .. }
+            parse(vec!["review".to_string()]).unwrap(),
+            Command::Review(ReviewArgs {
+                scope: ReviewScope::Overview,
+                year: None,
+                ..
+            })
         ));
         assert!(matches!(
             parse(
-                ["summary", "project", "--verbose"]
+                ["review", "quarter", "3", "--year", "2025"]
                     .map(str::to_string)
                     .to_vec()
             )
             .unwrap(),
-            Command::Summary { repo, verbose: true } if repo == std::path::Path::new("project")
+            Command::Review(ReviewArgs {
+                scope: ReviewScope::Quarter(Some(3)),
+                year: Some(2025),
+                ..
+            })
         ));
+        assert!(matches!(
+            parse(
+                ["review", "all", "--output", "review.md", "--force"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::Review(ReviewArgs {
+                scope: ReviewScope::All,
+                output: Some(output),
+                force: true,
+                ..
+            }) if output == std::path::Path::new("review.md")
+        ));
+        assert!(
+            parse(["summary"].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("replaced by review")
+        );
         assert!(parse(vec!["inspect".to_string()]).is_err());
+    }
+
+    #[test]
+    fn validates_review_periods_and_option_combinations() {
+        for args in [
+            vec!["review", "month", "13"],
+            vec!["review", "quarter", "0"],
+            vec!["review", "half", "3"],
+            vec!["review", "all", "--year", "2025"],
+            vec!["review", "--force"],
+        ] {
+            assert!(parse(args.into_iter().map(str::to_string).collect()).is_err());
+        }
+        assert!(matches!(
+            parse(
+                ["review", "month", "--year", "2025"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::Review(ReviewArgs {
+                scope: ReviewScope::Month(None),
+                year: Some(2025),
+                ..
+            })
+        ));
     }
 
     #[test]

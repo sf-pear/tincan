@@ -1,12 +1,14 @@
 use crate::branding;
-use crate::cli::{self, Command, JournalArgs, RecordArgs};
+use crate::cli::{self, Command, JournalArgs, RecordArgs, ReviewArgs, ReviewScope};
 use crate::git;
 use crate::model::{DecisionStatus, Kind, Record};
 use crate::skill::{self, InstallOutcome};
 use crate::store;
 use crate::util::display_path;
 use crate::workspace;
-use chrono::{Local, SecondsFormat};
+use chrono::{Datelike, Duration, Local, NaiveDate, SecondsFormat};
+use std::collections::BTreeMap;
+use std::io::Write;
 use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
@@ -24,7 +26,7 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
             Ok(())
         }
         Command::Init { repo } => init(repo),
-        Command::Summary { repo, verbose } => summary(repo, verbose),
+        Command::Review(args) => review(args),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Plan { repo } => plan(repo),
@@ -167,57 +169,260 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
     Ok(())
 }
 
-fn summary(path: std::path::PathBuf, verbose: bool) -> Result<(), String> {
-    let root = workspace::find(&path)?;
+fn review(args: ReviewArgs) -> Result<(), String> {
+    let root = workspace::find(&args.repo)?;
     let documents = store::scan(&root)?;
-    let groups = [
-        ("Decisions", "decision"),
-        ("Learnings", "learning"),
-        ("Journals", "journal"),
-    ];
-    for (label, kind) in groups {
-        print_summary_count(label, kind, &documents);
-    }
-    if verbose {
-        for (label, kind) in groups {
-            print_summary_details(label, kind, &root, &documents);
+    let dated = documents
+        .iter()
+        .map(|document| review_date(document).map(|date| (date, document)))
+        .collect::<Result<Vec<_>, _>>()?;
+    let content = match args.scope {
+        ReviewScope::Overview => render_review_overview(&dated),
+        scope => {
+            let today = Local::now().date_naive();
+            let (range, label) = review_range(&scope, args.year, today)?;
+            render_review_context(&dated, range, &label)
+        }
+    };
+    write_review_output(&content, args.output.as_deref(), args.force)
+}
+
+#[derive(Default)]
+struct ReviewCounts {
+    journals: usize,
+    decisions: usize,
+    learnings: usize,
+}
+
+fn render_review_overview(dated: &[(NaiveDate, &store::Document)]) -> String {
+    let Some(first) = dated.iter().map(|(date, _)| date).min() else {
+        return "No review history recorded.\n".to_string();
+    };
+    let last = dated.iter().map(|(date, _)| date).max().unwrap_or(first);
+    let mut years = BTreeMap::<i32, ReviewCounts>::new();
+    for (date, document) in dated {
+        let counts = years.entry(date.year()).or_default();
+        match document.kind.as_str() {
+            "journal" => counts.journals += 1,
+            "decision" => counts.decisions += 1,
+            "learning" => counts.learnings += 1,
+            _ => {}
         }
     }
-    Ok(())
+    let mut output = format!("Review history: {first} through {last}\n\n");
+    output.push_str("Year   Journal days   Decisions   Learnings\n");
+    for (year, counts) in years {
+        output.push_str(&format!(
+            "{year:<6} {:>12} {:>11} {:>11}\n",
+            counts.journals, counts.decisions, counts.learnings
+        ));
+    }
+    output.push_str(
+        "\nUse:\n  tincan review month 6\n  tincan review --year 2025\n  tincan review quarter 3 --year 2025\n  tincan review all\n",
+    );
+    output
 }
 
-fn print_summary_count(label: &str, kind: &str, documents: &[store::Document]) {
-    let count = documents
-        .iter()
-        .filter(|document| document.kind == kind)
-        .count();
-    let padded_label = format!("{label:<9}");
-    println!("{} {count}", branding::section(&padded_label));
+fn review_range(
+    scope: &ReviewScope,
+    requested_year: Option<i32>,
+    today: NaiveDate,
+) -> Result<(Option<(NaiveDate, NaiveDate)>, String), String> {
+    let year = requested_year.unwrap_or_else(|| today.year());
+    match scope {
+        ReviewScope::All if requested_year.is_none() => Ok((None, "all history".to_string())),
+        ReviewScope::All => Ok((
+            Some((date(year, 1, 1)?, date(year, 12, 31)?)),
+            year.to_string(),
+        )),
+        ReviewScope::Month(number) => {
+            let month = number.unwrap_or_else(|| today.month());
+            Ok((
+                Some((date(year, month, 1)?, last_day_of_month(year, month)?)),
+                format!("{year}-{month:02}"),
+            ))
+        }
+        ReviewScope::Quarter(number) => {
+            let quarter = number.unwrap_or_else(|| (today.month() - 1) / 3 + 1);
+            let start_month = (quarter - 1) * 3 + 1;
+            let end_month = start_month + 2;
+            Ok((
+                Some((
+                    date(year, start_month, 1)?,
+                    last_day_of_month(year, end_month)?,
+                )),
+                format!("{year} Q{quarter}"),
+            ))
+        }
+        ReviewScope::Half(number) => {
+            let half = number.unwrap_or_else(|| if today.month() <= 6 { 1 } else { 2 });
+            let start_month = if half == 1 { 1 } else { 7 };
+            let end_month = if half == 1 { 6 } else { 12 };
+            Ok((
+                Some((
+                    date(year, start_month, 1)?,
+                    last_day_of_month(year, end_month)?,
+                )),
+                format!("{year} H{half}"),
+            ))
+        }
+        ReviewScope::Overview => unreachable!(),
+    }
 }
 
-fn print_summary_details(
+fn date(year: i32, month: u32, day: u32) -> Result<NaiveDate, String> {
+    NaiveDate::from_ymd_opt(year, month, day)
+        .ok_or_else(|| format!("invalid calendar date: {year:04}-{month:02}-{day:02}"))
+}
+
+fn last_day_of_month(year: i32, month: u32) -> Result<NaiveDate, String> {
+    if month == 12 {
+        return date(year, 12, 31);
+    }
+    Ok(date(year, month + 1, 1)? - Duration::days(1))
+}
+
+fn review_date(document: &store::Document) -> Result<NaiveDate, String> {
+    let value = if document.kind == "journal" {
+        document.heading.as_str()
+    } else {
+        document.created_at.split('T').next().unwrap_or_default()
+    };
+    NaiveDate::parse_from_str(value, "%Y-%m-%d").map_err(|_| {
+        format!(
+            "invalid review date in {}: {value}",
+            document.path.display(),
+        )
+    })
+}
+
+fn render_review_context(
+    dated: &[(NaiveDate, &store::Document)],
+    range: Option<(NaiveDate, NaiveDate)>,
     label: &str,
-    kind: &str,
-    root: &std::path::Path,
-    documents: &[store::Document],
-) {
-    let matching: Vec<_> = documents
+) -> String {
+    let mut selected = dated
         .iter()
-        .filter(|document| document.kind == kind)
-        .collect();
-    if matching.is_empty() {
-        return;
+        .filter(|(date, _)| range.is_none_or(|(start, end)| *date >= start && *date <= end))
+        .copied()
+        .collect::<Vec<_>>();
+    selected.sort_by(|left, right| {
+        left.0
+            .cmp(&right.0)
+            .then(review_kind_order(left.1).cmp(&review_kind_order(right.1)))
+            .then(left.1.path.cmp(&right.1.path))
+    });
+    let mut output = format!("# Tincan review: {label}\n");
+    if selected.is_empty() {
+        output.push_str("\nNo Tincan records were created in this period.\n");
+        return output;
     }
-    println!();
-    println!("{}", branding::section(label));
-    for document in matching {
-        let relative = document.path.strip_prefix(root).unwrap_or(&document.path);
-        println!(
-            "  {}  {}",
-            branding::heading(&document.heading),
-            branding::path(&display_path(relative))
-        );
+    let mut current_date = None;
+    for (record_date, document) in selected {
+        if current_date != Some(record_date) {
+            output.push_str(&format!("\n## {record_date}\n"));
+            current_date = Some(record_date);
+        }
+        let kind = match document.kind.as_str() {
+            "journal" => "Journal".to_string(),
+            "decision" => document
+                .status
+                .as_deref()
+                .map(|status| format!("Decision ({status}): {}", document.heading))
+                .unwrap_or_else(|| format!("Decision: {}", document.heading)),
+            "learning" => format!("Learning: {}", document.heading),
+            other => other.to_string(),
+        };
+        output.push_str(&format!("\n### {kind}\n"));
+        let body = review_body(&document.body);
+        if !body.is_empty() {
+            output.push('\n');
+            output.push_str(&body);
+            if !body.ends_with('\n') {
+                output.push('\n');
+            }
+        }
     }
+    output
+}
+
+fn review_kind_order(document: &store::Document) -> u8 {
+    match document.kind.as_str() {
+        "journal" => 0,
+        "decision" => 1,
+        "learning" => 2,
+        _ => 3,
+    }
+}
+
+fn review_body(body: &str) -> String {
+    let mut blocks = Vec::<Vec<&str>>::new();
+    let mut current = Vec::new();
+    for line in body
+        .lines()
+        .skip_while(|line| !line.starts_with("# "))
+        .skip(1)
+    {
+        if line.starts_with("## ") && !current.is_empty() {
+            blocks.push(current);
+            current = Vec::new();
+        }
+        current.push(line);
+    }
+    if !current.is_empty() {
+        blocks.push(current);
+    }
+    let mut output = String::new();
+    for block in blocks {
+        if !block.iter().any(|line| {
+            !line.trim().is_empty() && line.trim() != "<!-- none -->" && !line.starts_with("## ")
+        }) {
+            continue;
+        }
+        for line in block {
+            if line.trim() == "<!-- none -->" {
+                continue;
+            }
+            if line.starts_with('#') {
+                output.push_str("##");
+            }
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    output.trim().to_string()
+}
+
+fn write_review_output(
+    content: &str,
+    output: Option<&std::path::Path>,
+    force: bool,
+) -> Result<(), String> {
+    let Some(path) = output else {
+        print!("{content}");
+        return Ok(());
+    };
+    let mut options = std::fs::OpenOptions::new();
+    options.write(true);
+    if force {
+        options.create(true).truncate(true);
+    } else {
+        options.create_new(true);
+    }
+    let mut file = options.open(path).map_err(|error| {
+        if error.kind() == std::io::ErrorKind::AlreadyExists {
+            format!(
+                "review output already exists: {}; use --force to replace it",
+                path.display()
+            )
+        } else {
+            format!("cannot write review output {}: {error}", path.display())
+        }
+    })?;
+    file.write_all(content.as_bytes())
+        .map_err(|error| format!("cannot write review output {}: {error}", path.display()))?;
+    println!("Wrote review: {}", display_path(path));
+    Ok(())
 }
 
 fn record(args: RecordArgs) -> Result<(), String> {
@@ -546,6 +751,96 @@ mod tests {
         assert!(paths_overlap("src/feature/a.rs", "src/feature"));
         assert!(paths_overlap("src/feature", "src/feature/a.rs"));
         assert!(!paths_overlap("src/a.rs", "src/b.rs"));
+    }
+
+    fn review_document(kind: &str, created_at: &str, heading: &str, body: &str) -> store::Document {
+        store::Document {
+            path: std::path::PathBuf::from(format!("{kind}/{heading}.md")),
+            id: format!("{kind}-{heading}"),
+            created_at: created_at.to_string(),
+            heading: heading.to_string(),
+            body: body.to_string(),
+            kind: kind.to_string(),
+            status: (kind == "decision").then(|| "active".to_string()),
+            files: Vec::new(),
+            topics: Vec::new(),
+            related: Vec::new(),
+            supersedes: Vec::new(),
+            superseded_by: Vec::new(),
+            source_record: None,
+            scope: store::Scope::Project,
+        }
+    }
+
+    #[test]
+    fn review_overview_groups_record_counts_by_year() {
+        let documents = [
+            review_document(
+                "journal",
+                "2025-02-03T09:00:00Z",
+                "2025-02-03",
+                "# 2025-02-03\n",
+            ),
+            review_document(
+                "decision",
+                "2025-07-01T09:00:00Z",
+                "Choose Markdown",
+                "# Choose Markdown\n",
+            ),
+            review_document(
+                "learning",
+                "2026-01-10T09:00:00Z",
+                "Keep evidence",
+                "# Keep evidence\n",
+            ),
+        ];
+        let dated = documents
+            .iter()
+            .map(|document| (review_date(document).unwrap(), document))
+            .collect::<Vec<_>>();
+
+        let output = render_review_overview(&dated);
+
+        assert!(output.contains("Review history: 2025-02-03 through 2026-01-10"));
+        assert!(output.contains("2025              1           1           0"));
+        assert!(output.contains("2026              0           0           1"));
+        assert!(output.contains("tincan review month 6"));
+        assert!(output.contains("tincan review all"));
+    }
+
+    #[test]
+    fn review_context_filters_calendar_periods_and_omits_empty_sections() {
+        let journal = review_document(
+            "journal",
+            "2025-08-05T09:00:00+02:00",
+            "2025-08-05",
+            "# 2025-08-05\n\n## Done\n\n- Shipped the handoff\n\n## Next\n\n<!-- none -->\n",
+        );
+        let later = review_document(
+            "learning",
+            "2025-10-01T09:00:00+02:00",
+            "Outside Q3",
+            "# Outside Q3\n",
+        );
+        let documents = [journal, later];
+        let dated = documents
+            .iter()
+            .map(|document| (review_date(document).unwrap(), document))
+            .collect::<Vec<_>>();
+        let (range, label) = review_range(
+            &ReviewScope::Quarter(Some(3)),
+            Some(2025),
+            NaiveDate::from_ymd_opt(2026, 8, 27).unwrap(),
+        )
+        .unwrap();
+
+        let output = render_review_context(&dated, range, &label);
+
+        assert!(output.contains("# Tincan review: 2025 Q3"));
+        assert!(output.contains("#### Done"));
+        assert!(output.contains("Shipped the handoff"));
+        assert!(!output.contains("## Next"));
+        assert!(!output.contains("Outside Q3"));
     }
 
     #[test]

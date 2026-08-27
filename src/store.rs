@@ -26,6 +26,7 @@ impl Scope {
 pub struct Document {
     pub path: PathBuf,
     pub id: String,
+    pub created_at: String,
     pub heading: String,
     pub body: String,
     pub kind: String,
@@ -424,6 +425,12 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
             path.display()
         ));
     }
+    let created_at = scalar(&text, "created_at").ok_or_else(|| {
+        format!(
+            "invalid frontmatter in {}: created_at is required",
+            path.display()
+        )
+    })?;
     if matches!(kind.as_str(), "decision" | "learning") {
         uuid::Uuid::parse_str(&id).map_err(|_| {
             format!(
@@ -431,12 +438,6 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
                 path.display()
             )
         })?;
-        if scalar(&text, "created_at").is_none() {
-            return Err(format!(
-                "invalid frontmatter in {}: created_at is required",
-                path.display()
-            ));
-        }
         for field in ["related", "supersedes", "superseded_by"] {
             for related_id in yaml_list(&text, field) {
                 if uuid::Uuid::parse_str(&related_id).is_err() {
@@ -484,6 +485,7 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
     }
     Ok(Document {
         id,
+        created_at,
         heading,
         body,
         kind,

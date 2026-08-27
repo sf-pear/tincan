@@ -1,4 +1,4 @@
 interface:
   display_name: "Tincan"
   short_description: "Preserve project handoffs and durable reasoning"
-  default_prompt: "Use $tincan to offer initialization when needed, resume project context, maintain a sufficient handoff and living direction as meaningful work develops, preserve accepted decisions, record evidence-supported project learnings, and lift user-approved global learnings."
+  default_prompt: "Use $tincan to offer initialization when needed, resume project context, maintain a sufficient handoff and living direction as meaningful work develops, retrieve deterministic historical context for requested reviews, preserve accepted decisions, record evidence-supported project learnings, and lift user-approved global learnings."

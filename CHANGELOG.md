@@ -6,12 +6,23 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+### Added
+
+- Add `review` with a compact year-by-year history overview and explicit all,
+  year, month, quarter, and half-year context selection, including protected
+  Markdown file output.
+
 ### Changed
 
 - Teach the bundled skill to maintain a sufficient project handoff before
   returning meaningful work, review the living plan at the same boundary, and
   avoid duplicating Git history, changelogs, issue trackers, or routine task
   summaries in the journal.
+
+### Removed
+
+- Replace the limited `summary` inventory with the more useful, time-oriented
+  `review` workflow and an actionable migration error.
 
 ## [0.5.0] - 2026-08-18
 

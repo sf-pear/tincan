@@ -68,7 +68,7 @@ tincan journal --done "Implemented the compact gallery read model" `
   --next "Start with the stale-response test"
 
 tincan search "gallery"
-tincan summary
+tincan review
 tincan changes
 ```
 

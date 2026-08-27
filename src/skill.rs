@@ -535,6 +535,22 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_scopes_historical_reviews_before_interpreting_them() {
+        for instruction in [
+            "run bare `tincan review` first",
+            "`review --year",
+            "use `review all`",
+            "deterministic source context, not an interpretation",
+            "do not store a derived review unless the user asks for a file",
+        ] {
+            assert!(
+                SKILL.contains(instruction),
+                "missing instruction: {instruction}"
+            );
+        }
+    }
+
+    #[test]
     fn bundled_skill_uses_one_startup_command_and_requires_lift_approval() {
         assert!(!SKILL.contains("tincan --help"));
         assert!(SKILL.contains("Run `tincan resume` once"));

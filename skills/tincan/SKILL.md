@@ -24,6 +24,19 @@ workspace may contain zero, one, or several Git repositories.
    only relevant full records with `show`, and do not repeat searches already
    performed for the same task.
 
+## Review history
+
+When the user asks for a project retrospective or a review of work over time,
+run bare `tincan review` first to inspect the recorded date span and yearly
+counts. Then request only the useful calendar context with `review --year
+YEAR`, `review month`, `review quarter`, or `review half`; use `review all`
+only when the overview shows that loading every record is reasonable or the
+user explicitly requests all history.
+
+Tincan returns deterministic source context, not an interpretation. Summarize
+that context for the user's stated purpose, distinguish recorded evidence from
+inference, and do not store a derived review unless the user asks for a file.
+
 ## Keep the skill current
 
 Run `tincan skill status` when the user asks whether installed Tincan skills are
