@@ -6,15 +6,17 @@ repositories.
 
 ## Memory
 
-- **Plan:** current outcome-level work and ideas. It is a small living document.
-- **Journal:** a dated snapshot of done, planned, open, and next.
+- **Plan:** a small living guide to current outcome-level direction and ideas.
+- **Journal:** a dated handoff with enough context to resume useful work.
 - **Decision:** an accepted choice that constrains future work.
 - **Learning:** a durable conclusion supported by evidence.
 - **Global learning:** a user-approved learning available across projects.
 
-The journal preserves meaningful project history and handoff context. Transient
-status belongs there only when it explains progress, a blocker, an open
-question, or where work should resume. The plan reflects the current direction.
+The journal is not a complete project history. It preserves context that would
+otherwise remain in someone's head: where work stopped, what remains unclear,
+why the current state matters, and where work should resume. Do not duplicate
+Git history, changelogs, issue trackers, or routine task summaries. The plan
+reflects current direction rather than implementation steps.
 
 A learning must remain useful beyond the current session and change a future
 implementation, debugging, review, or architectural action. It should prevent a
@@ -44,7 +46,7 @@ shows the complete Tincan skill path, and omits installations already current.
 | --- | --- |
 | `init [PATH]` | Create private `.tincan/` storage. |
 | `plan` | Print the living `.tincan/plan.md`; edit that file directly. |
-| `journal` | Add concise bullets to today's historical work record. |
+| `journal` | Add concise context to today's project handoff. |
 | `resume` | Print the living plan and latest journal when starting or wrapping up. |
 | `decide STATEMENT` | Record an accepted choice. |
 | `learn STATEMENT` | Record an evidence-supported reusable conclusion. |
@@ -72,11 +74,12 @@ tincan journal `
   --next "Exercise the workflow in a real multi-repo project"
 ```
 
-Journal bullets are one-line summaries. Record accepted choices with `decide`
-and durable evidence-backed conclusions with `learn`; do not duplicate them in
-the journal. Their timestamps preserve when they were recorded. Keep the plan
-limited to current direction, not implementation checklists or a duplicate of
-an issue tracker.
+Journal bullets are concise handoff notes, not an inventory of completed work.
+Before handing meaningful work back, review whether the next person has enough
+context and update only what materially changed. Record accepted choices with
+`decide` and durable evidence-backed conclusions with `learn`; do not duplicate
+them in the journal. Review the plan at the same boundary, but change it only
+when an outcome or idea was completed, invalidated, refined, or revealed.
 
 Run `tincan --help` for complete syntax.
 

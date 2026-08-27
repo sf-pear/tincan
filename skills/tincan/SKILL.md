@@ -1,6 +1,6 @@
 ---
 name: tincan
-description: Maintain private workspace-local development continuity with Tincan's plan, daily journal, accepted decisions, and evidence-supported learnings. Use when a workspace has or could benefit from `.tincan/config.toml`, when resuming work, or when the user asks to wrap up, finish for today, record what was learned, or prepare to continue tomorrow.
+description: Maintain private workspace-local development continuity with Tincan's plan, daily journal, accepted decisions, and evidence-supported learnings. Use when a workspace has or could benefit from `.tincan/config.toml`, when resuming work, while meaningful project context develops, or when the user asks to wrap up, finish for today, record what was learned, or prepare to continue tomorrow.
 ---
 
 # Tincan
@@ -36,14 +36,39 @@ their confirmation.
 
 Edit `.tincan/plan.md` directly. Keep only current outcome-level work and ideas.
 Do not turn it into an implementation checklist or duplicate an issue tracker.
-Remove completed items because the journal preserves their history.
+Remove completed items. Preserve only any resulting handoff context that would
+otherwise be lost.
+
+After meaningful project work, review the plan before handing control back.
+Change it only when the work completes, invalidates, refines, or reveals an
+outcome or idea. The plan guides current project direction; routine activity
+does not require a plan edit.
+
+## Maintain the handoff
+
+Before handing control back after meaningful project work, briefly review
+whether the next person or agent still has enough context to resume safely.
+Preserve context that would otherwise remain in someone's head: where work
+stopped, what is unresolved, why the current state matters, and the most useful
+next starting point.
+
+If the handoff materially changed, update today's journal with only the
+applicable `--done`, `--planned`, `--question`, and `--next` bullets. If the
+existing journal and plan already provide enough context, write nothing. Do not
+wait for the user to request a wrap-up, and do not let memory maintenance delay
+the requested result.
+
+The journal is a sufficient handoff, not a complete history. Do not mirror
+commits, changelogs, issue trackers, file lists, routine commands, or the final
+response. A push, merge, release, or other milestone can prompt a handoff
+review, but does not itself require a journal entry.
 
 ## Classify memory
 
-- Journal bullets summarize meaningful completed work, planned work, open
-  questions, and the concrete next starting point. Include
-  transient status only when it materially explains progress, a blocker, an
-  open question, or where work should resume.
+- Journal bullets preserve only the meaningful progress, unfinished context,
+  open questions, and concrete next starting point needed for a useful handoff.
+  Include transient status only when it materially explains a blocker, an open
+  question, why the current state matters, or where work should resume.
 - `tincan decide <statement>` records an accepted choice that constrains future
   work. Use `--supersedes <uuid>` when replacing an active decision.
 - `tincan learn <statement>` records an evidence-supported conclusion that
@@ -95,14 +120,14 @@ Treat natural requests such as "wrap up", "done for today", "good night",
 "what did we learn", and "where do I start tomorrow" as a wrap-up request.
 
 1. Review the conversation, current journal, and plan for meaningful completed
-   work, accepted decisions, evidence-supported learnings, remaining plans,
-   open questions, and the next starting point.
+   outcomes, accepted decisions, evidence-supported learnings, remaining
+   direction, open questions, and the next starting point.
 2. Record any missed durable decisions or learnings. Do not invent acceptance
    or evidence.
 3. Update `.tincan/plan.md` so it reflects only current direction.
-4. Update today's journal with repeatable `--done`, `--planned`, `--question`,
-   and `--next` options. Keep bullets short. Do not duplicate decisions or
-   learnings in the journal; their dated records are canonical.
+4. Update today's journal only where the handoff materially changed. Keep
+   bullets short and do not duplicate Git history, decisions, or learnings;
+   their existing records are canonical.
 5. Run `tincan resume` and show the finalized journal to the user.
 
 Distinguish implemented and verified work from work that was only decided or

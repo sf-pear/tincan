@@ -517,6 +517,24 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_maintains_a_sufficient_handoff_without_mirroring_git() {
+        for instruction in [
+            "Before handing control back after meaningful project work",
+            "already provide enough context, write nothing",
+            "The journal is a sufficient handoff, not a complete history",
+            "Do not mirror",
+            "does not itself require a journal entry",
+            "review the plan before handing control back",
+            "does not require a plan edit",
+        ] {
+            assert!(
+                SKILL.contains(instruction),
+                "missing instruction: {instruction}"
+            );
+        }
+    }
+
+    #[test]
     fn bundled_skill_uses_one_startup_command_and_requires_lift_approval() {
         assert!(!SKILL.contains("tincan --help"));
         assert!(SKILL.contains("Run `tincan resume` once"));

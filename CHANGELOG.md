@@ -6,6 +6,13 @@ The format follows Keep a Changelog and versions follow Semantic Versioning.
 
 ## [Unreleased]
 
+### Changed
+
+- Teach the bundled skill to maintain a sufficient project handoff before
+  returning meaningful work, review the living plan at the same boundary, and
+  avoid duplicating Git history, changelogs, issue trackers, or routine task
+  summaries in the journal.
+
 ## [0.5.0] - 2026-08-18
 
 ### Added
