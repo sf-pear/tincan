@@ -456,7 +456,7 @@ mod tests {
 
     #[test]
     fn confirms_skill_installation_by_default() {
-        assert!(INSTALL_CONFIRM_DEFAULT);
+        const { assert!(INSTALL_CONFIRM_DEFAULT) };
     }
 
     #[test]
@@ -539,7 +539,11 @@ mod tests {
         for instruction in [
             "run bare `tincan review` first",
             "`review --year",
-            "use `review all`",
+            "use `review --all-time`",
+            "Use `tincan projects` to show registry state",
+            "use `tincan projects unregister PATH_OR_ID`",
+            "never deletes project `.tincan/`",
+            "run `tincan init PATH` on",
             "deterministic source context, not an interpretation",
             "do not store a derived review unless the user asks for a file",
         ] {

@@ -9,6 +9,10 @@ pub enum Command {
         repo: PathBuf,
     },
     Review(ReviewArgs),
+    ProjectsList,
+    ProjectsUnregister {
+        target: Option<String>,
+    },
     Record(RecordArgs),
     Journal(JournalArgs),
     Plan {
@@ -53,7 +57,7 @@ pub struct JournalArgs {
 pub struct ReviewArgs {
     pub repo: PathBuf,
     pub scope: ReviewScope,
-    pub year: Option<i32>,
+    pub all_projects: bool,
     pub output: Option<PathBuf>,
     pub force: bool,
 }
@@ -61,10 +65,11 @@ pub struct ReviewArgs {
 #[derive(Debug, PartialEq)]
 pub enum ReviewScope {
     Overview,
-    All,
-    Month(Option<u32>),
-    Quarter(Option<u32>),
-    Half(Option<u32>),
+    AllTime,
+    Year(i32),
+    Month(i32, u32),
+    Quarter(i32, u32),
+    Half(i32, u32),
 }
 
 #[derive(Debug, PartialEq)]
@@ -95,6 +100,7 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
                 .to_string(),
         ),
         "review" => parse_review(&args[1..]),
+        "projects" => parse_projects(&args[1..]),
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
@@ -171,6 +177,19 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
     }
 }
 
+fn parse_projects(args: &[String]) -> Result<Command, String> {
+    match args {
+        [] => Ok(Command::ProjectsList),
+        [action, target] if action == "unregister" => Ok(Command::ProjectsUnregister {
+            target: Some(target.clone()),
+        }),
+        [action] if action == "unregister" => {
+            Err("projects unregister requires PATH or WORKSPACE_ID".to_string())
+        }
+        _ => Err("projects accepts no arguments or `unregister PATH|WORKSPACE_ID`".to_string()),
+    }
+}
+
 fn parse_lift(args: &[String]) -> Result<Command, String> {
     let values = Flags::parse(args)?;
     values.ensure_only(&["directory", "from"])?;
@@ -217,87 +236,123 @@ fn parse_journal(args: &[String]) -> Result<Command, String> {
 
 fn parse_review(args: &[String]) -> Result<Command, String> {
     let values = Flags::parse(args)?;
-    values.ensure_only(&["directory", "year", "output", "force"])?;
-    values.ensure_at_most_one(&["directory", "year", "output", "force"])?;
-    let year = values
-        .one("year")
-        .map(|value| {
-            if value.len() != 4 || !value.chars().all(|character| character.is_ascii_digit()) {
-                return Err(format!("--year requires a four-digit year: {value}"));
-            }
-            value
-                .parse::<i32>()
-                .map_err(|_| format!("--year requires a four-digit year: {value}"))
-                .and_then(|year| {
-                    if (1..=9999).contains(&year) {
-                        Ok(year)
-                    } else {
-                        Err(format!("--year requires a year from 0001 to 9999: {value}"))
-                    }
-                })
-        })
-        .transpose()?;
+    values.ensure_only(&[
+        "directory",
+        "year",
+        "month",
+        "quarter",
+        "half",
+        "all-time",
+        "all-projects",
+        "output",
+        "force",
+    ])?;
+    values.ensure_at_most_one(&[
+        "directory",
+        "year",
+        "month",
+        "quarter",
+        "half",
+        "all-time",
+        "all-projects",
+        "output",
+        "force",
+    ])?;
+    if !values.positionals.is_empty() {
+        return Err("review does not accept positional scopes; use --year, --month, --quarter, --half, or --all-time".to_string());
+    }
     if values.present("force") && !values.present("output") {
         return Err("--force requires --output <FILE>".to_string());
     }
-    let scope = match values.positionals.as_slice() {
-        [] if year.is_some() => ReviewScope::All,
-        [] => ReviewScope::Overview,
-        [scope] if scope == "all" => {
-            if year.is_some() {
-                return Err("review all cannot be combined with --year".to_string());
-            }
-            ReviewScope::All
+    let time_flags = ["year", "month", "quarter", "half", "all-time"]
+        .into_iter()
+        .filter(|name| values.present(name))
+        .collect::<Vec<_>>();
+    if time_flags.len() > 1 {
+        return Err(format!(
+            "review time options are mutually exclusive: {}",
+            time_flags
+                .iter()
+                .map(|name| format!("--{name}"))
+                .collect::<Vec<_>>()
+                .join(", ")
+        ));
+    }
+    let scope = match time_flags.first().copied() {
+        None => ReviewScope::Overview,
+        Some("all-time") => ReviewScope::AllTime,
+        Some("year") => ReviewScope::Year(parse_year(&values.one("year").unwrap(), "--year")?),
+        Some("month") => {
+            let (year, month) = parse_calendar_period(&values.one("month").unwrap(), "month", 12)?;
+            ReviewScope::Month(year, month)
         }
-        [scope] if matches!(scope.as_str(), "month" | "quarter" | "half") => {
-            review_period(scope, None)?
+        Some("quarter") => {
+            let (year, quarter) =
+                parse_calendar_period(&values.one("quarter").unwrap(), "quarter", 4)?;
+            ReviewScope::Quarter(year, quarter)
         }
-        [scope, value] if matches!(scope.as_str(), "month" | "quarter" | "half") => {
-            review_period(scope, Some(value))?
+        Some("half") => {
+            let (year, half) = parse_calendar_period(&values.one("half").unwrap(), "half", 2)?;
+            ReviewScope::Half(year, half)
         }
-        _ => {
-            return Err(
-                "review accepts `all`, `month [NUMBER]`, `quarter [NUMBER]`, or `half [NUMBER]`"
-                    .to_string(),
-            );
-        }
+        Some(_) => unreachable!(),
     };
     Ok(Command::Review(ReviewArgs {
         repo: values.directory()?,
         scope,
-        year,
+        all_projects: values.present("all-projects"),
         output: values.one("output").map(PathBuf::from),
         force: values.present("force"),
     }))
 }
 
-fn review_period(scope: &str, value: Option<&String>) -> Result<ReviewScope, String> {
-    let number = value
-        .map(|value| {
-            value
-                .parse::<u32>()
-                .map_err(|_| format!("review {scope} requires a number: {value}"))
-        })
-        .transpose()?;
-    let maximum = match scope {
-        "month" => 12,
-        "quarter" => 4,
-        "half" => 2,
-        _ => unreachable!(),
-    };
-    if let Some(number) = number
-        && !(1..=maximum).contains(&number)
-    {
+fn parse_year(value: &str, option: &str) -> Result<i32, String> {
+    if value.len() != 4 || !value.chars().all(|character| character.is_ascii_digit()) {
+        return Err(format!("{option} requires a four-digit year: {value}"));
+    }
+    value
+        .parse::<i32>()
+        .ok()
+        .filter(|year| (1..=9999).contains(year))
+        .ok_or_else(|| format!("{option} requires a year from 0001 to 9999: {value}"))
+}
+
+fn parse_calendar_period(value: &str, period: &str, maximum: u32) -> Result<(i32, u32), String> {
+    let (year, number) = value.split_once('-').ok_or_else(|| {
+        format!(
+            "--{period} requires YYYY-{}: {value}",
+            period_format(period)
+        )
+    })?;
+    let year = parse_year(year, &format!("--{period}"))?;
+    let number = match period {
+        "month" if number.len() == 2 => number,
+        "quarter" => number.strip_prefix('Q').unwrap_or(""),
+        "half" => number.strip_prefix('H').unwrap_or(""),
+        _ => "",
+    }
+    .parse::<u32>()
+    .map_err(|_| {
+        format!(
+            "--{period} requires YYYY-{}: {value}",
+            period_format(period)
+        )
+    })?;
+    if !(1..=maximum).contains(&number) {
         return Err(format!(
-            "review {scope} requires a number from 1 to {maximum}: {number}"
+            "--{period} requires a value from 1 to {maximum}: {value}"
         ));
     }
-    Ok(match scope {
-        "month" => ReviewScope::Month(number),
-        "quarter" => ReviewScope::Quarter(number),
-        "half" => ReviewScope::Half(number),
+    Ok((year, number))
+}
+
+fn period_format(period: &str) -> &'static str {
+    match period {
+        "month" => "MM",
+        "quarter" => "QN",
+        "half" => "HN",
         _ => unreachable!(),
-    })
+    }
 }
 
 fn parse_skill(args: &[String]) -> Result<Command, String> {
@@ -407,7 +462,10 @@ impl Flags {
                 if name.is_empty() {
                     return Err("empty flag".to_string());
                 }
-                if matches!(name, "changed" | "force" | "verbose") {
+                if matches!(
+                    name,
+                    "changed" | "force" | "verbose" | "all-time" | "all-projects"
+                ) {
                     parsed.values.push((name.to_string(), None));
                     index += 1;
                     continue;
@@ -519,7 +577,9 @@ USAGE
 
 COMMANDS
   init [DIRECTORY]              Initialize private .tincan/ storage
-  review [SCOPE] [OPTIONS]      Inspect history or select retrospective context
+  review [OPTIONS]              Inspect history or select retrospective context
+  projects                      List registered workspaces and their status
+  projects unregister TARGET    Forget one registration without changing projects
   plan [-d|--directory PATH]    Print the living project plan
   journal [OPTIONS]             Update today's concise work record
   resume [-d|--directory PATH]  Print the living plan and latest journal
@@ -544,7 +604,8 @@ WORKSPACES AND FILES
   of normal Git tracking when the workspace is inside a repository.
   Global learnings live under ~/.tincan/global/learnings. Set TINCAN_HOME to
   relocate the personal .tincan directory. Search and show include global
-  learnings, including when run outside a project workspace.
+  learnings, including when run outside a project workspace. Initialized
+  workspaces are registered by stable ID for optional cross-project reviews.
 
 RECORD IDS
   Decisions and learnings receive stable UUID v7 IDs such as
@@ -558,8 +619,10 @@ EXAMPLES
   tincan init .
   tincan plan
   tincan review
-  tincan review quarter 3 --year 2025
-  tincan review all --output review.md
+  tincan review --quarter 2025-Q3
+  tincan review --year 2025 --all-projects
+  tincan projects
+  tincan review --all-time --output review.md
   tincan journal --done "Implemented deterministic path matching"
   tincan decide "Keep Markdown canonical" --topic storage
   tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
@@ -575,16 +638,23 @@ JOURNAL OPTIONS
 
 REVIEW
   tincan review [-d|--directory PATH]
-  tincan review all [--output FILE] [--force]
   tincan review --year YEAR [--output FILE] [--force]
-  tincan review month [NUMBER] [--year YEAR] [--output FILE] [--force]
-  tincan review quarter [NUMBER] [--year YEAR] [--output FILE] [--force]
-  tincan review half [NUMBER] [--year YEAR] [--output FILE] [--force]
+  tincan review --month YYYY-MM [--output FILE] [--force]
+  tincan review --quarter YYYY-QN [--output FILE] [--force]
+  tincan review --half YYYY-HN [--output FILE] [--force]
+  tincan review --all-time [--output FILE] [--force]
 
-  With no scope, show recorded date coverage and yearly counts. Missing period
-  numbers and years use the current calendar period. `all` explicitly selects
-  every project journal, decision, and learning. Output files are created
+  With no time option, show recorded date coverage and yearly counts. Time
+  options are mutually exclusive. The current project is the default; add
+  --all-projects to read every registered project. Output files are created
   without overwriting unless --force is provided.
+
+PROJECTS
+  tincan projects
+  tincan projects unregister PATH|WORKSPACE_ID
+
+  List registrations and whether each path is available. Unregister one by path
+  or ID. Project .tincan directories are untouched.
 
 SKILL INSTALL
   tincan skill install [--path SKILLS_DIRECTORY] [--force]
@@ -760,32 +830,32 @@ mod tests {
             parse(vec!["review".to_string()]).unwrap(),
             Command::Review(ReviewArgs {
                 scope: ReviewScope::Overview,
-                year: None,
+                all_projects: false,
                 ..
             })
         ));
         assert!(matches!(
             parse(
-                ["review", "quarter", "3", "--year", "2025"]
+                ["review", "--quarter", "2025-Q3", "--all-projects"]
                     .map(str::to_string)
                     .to_vec()
             )
             .unwrap(),
             Command::Review(ReviewArgs {
-                scope: ReviewScope::Quarter(Some(3)),
-                year: Some(2025),
+                scope: ReviewScope::Quarter(2025, 3),
+                all_projects: true,
                 ..
             })
         ));
         assert!(matches!(
             parse(
-                ["review", "all", "--output", "review.md", "--force"]
+                ["review", "--all-time", "--output", "review.md", "--force"]
                     .map(str::to_string)
                     .to_vec()
             )
             .unwrap(),
             Command::Review(ReviewArgs {
-                scope: ReviewScope::All,
+                scope: ReviewScope::AllTime,
                 output: Some(output),
                 force: true,
                 ..
@@ -800,26 +870,47 @@ mod tests {
     }
 
     #[test]
+    fn parses_project_registry_commands() {
+        assert_eq!(
+            parse(vec!["projects".into()]).unwrap(),
+            Command::ProjectsList
+        );
+        let id = "019fd6d9-1ff8-7082-9f86-2b7d89712a57";
+        assert_eq!(
+            parse(["projects", "unregister", id].map(str::to_string).to_vec()).unwrap(),
+            Command::ProjectsUnregister {
+                target: Some(id.into())
+            }
+        );
+        assert!(
+            parse(["projects", "unregister"].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("requires PATH or WORKSPACE_ID")
+        );
+    }
+
+    #[test]
     fn validates_review_periods_and_option_combinations() {
         for args in [
-            vec!["review", "month", "13"],
-            vec!["review", "quarter", "0"],
-            vec!["review", "half", "3"],
-            vec!["review", "all", "--year", "2025"],
+            vec!["review", "--month", "2025-13"],
+            vec!["review", "--quarter", "2025-Q0"],
+            vec!["review", "--half", "2025-H3"],
+            vec!["review", "--quarter", "2025-3"],
+            vec!["review", "--all-time", "--year", "2025"],
             vec!["review", "--force"],
+            vec!["review", "all"],
         ] {
             assert!(parse(args.into_iter().map(str::to_string).collect()).is_err());
         }
         assert!(matches!(
             parse(
-                ["review", "month", "--year", "2025"]
+                ["review", "--month", "2025-08"]
                     .map(str::to_string)
                     .to_vec()
             )
             .unwrap(),
             Command::Review(ReviewArgs {
-                scope: ReviewScope::Month(None),
-                year: Some(2025),
+                scope: ReviewScope::Month(2025, 8),
                 ..
             })
         ));

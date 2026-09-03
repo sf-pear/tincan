@@ -3,7 +3,36 @@ use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn tincan() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_tincan"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_tincan"));
+    let test_name = std::thread::current()
+        .name()
+        .unwrap_or("unnamed-test")
+        .chars()
+        .map(|character| {
+            if character.is_ascii_alphanumeric() {
+                character
+            } else {
+                '_'
+            }
+        })
+        .collect::<String>();
+    command.env(
+        "TINCAN_HOME",
+        std::env::temp_dir().join(format!(
+            "tincan-cli-tests-{}-{test_name}",
+            std::process::id()
+        )),
+    );
+    command
+}
+
+fn workspace_id(workspace: &std::path::Path) -> String {
+    fs::read_to_string(workspace.join(".tincan/config.toml"))
+        .unwrap()
+        .lines()
+        .find_map(|line| line.strip_prefix("workspace_id = \"")?.strip_suffix('"'))
+        .unwrap()
+        .to_string()
 }
 
 #[test]
@@ -69,7 +98,7 @@ fn review_replaces_summary_and_writes_selected_context_safely() {
     let destination = workspace.join("review-2025-q3.md");
     let selected = tincan()
         .current_dir(&workspace)
-        .args(["review", "quarter", "3", "--year", "2025", "--output"])
+        .args(["review", "--quarter", "2025-Q3", "--output"])
         .arg(&destination)
         .output()
         .unwrap();
@@ -119,6 +148,279 @@ fn review_replaces_summary_and_writes_selected_context_safely() {
             .contains("summary was replaced by review")
     );
     fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
+fn cross_project_review_uses_registry_and_reconnects_moved_workspaces() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("tincan-cli-projects-{unique}"));
+    let tincan_home = root.join("personal-tincan");
+    let first = root.join("first");
+    let second = root.join("second");
+    fs::create_dir_all(&first).unwrap();
+    fs::create_dir_all(&second).unwrap();
+    for project in [&first, &second] {
+        let output = tincan()
+            .env("TINCAN_HOME", &tincan_home)
+            .arg("init")
+            .arg(project)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+    fs::write(
+        first.join(".tincan/journal/2025-08-05.md"),
+        "---\nid: \"journal-2025-08-05\"\ntype: \"journal\"\ncreated_at: \"2025-08-05T09:00:00Z\"\n---\n\n# 2025-08-05\n\n## Done\n\n- Worked on the first project\n",
+    )
+    .unwrap();
+    fs::write(
+        second.join(".tincan/journal/2025-08-06.md"),
+        "---\nid: \"journal-2025-08-06\"\ntype: \"journal\"\ncreated_at: \"2025-08-06T09:00:00Z\"\n---\n\n# 2025-08-06\n\n## Done\n\n- Worked on the second project\n",
+    )
+    .unwrap();
+    let stale_id = workspace_id(&second);
+
+    let moved = root.join("first-moved");
+    fs::rename(&first, &moved).unwrap();
+    let reconnect = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&moved)
+        .arg("plan")
+        .output()
+        .unwrap();
+    assert!(reconnect.status.success());
+
+    let review = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&root)
+        .args(["review", "--year", "2025", "--all-projects"])
+        .output()
+        .unwrap();
+    assert!(
+        review.status.success(),
+        "{}",
+        String::from_utf8_lossy(&review.stderr)
+    );
+    let content = String::from_utf8(review.stdout).unwrap();
+    assert!(content.contains("# Tincan review: 2025 — all projects"));
+    assert!(content.contains("## first-moved"));
+    assert!(content.contains("Worked on the first project"));
+    assert!(content.contains("## second"));
+    assert!(content.contains("Worked on the second project"));
+    assert!(!content.contains("Unavailable projects"));
+
+    fs::remove_dir_all(&second).unwrap();
+    let stale_review = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&root)
+        .args(["review", "--year", "2025", "--all-projects"])
+        .output()
+        .unwrap();
+    let stale_content = String::from_utf8(stale_review.stdout).unwrap();
+    assert!(stale_content.contains("## Unavailable projects"));
+    assert!(stale_content.contains("second"));
+
+    let removed = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .args(["projects", "unregister", &stale_id])
+        .output()
+        .unwrap();
+    assert!(removed.status.success());
+    assert!(
+        !tincan_home
+            .join("projects")
+            .join(format!("{stale_id}.path"))
+            .exists()
+    );
+
+    let unregistered_current = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .args(["projects", "unregister"])
+        .arg(&moved)
+        .output()
+        .unwrap();
+    assert!(unregistered_current.status.success());
+    assert_eq!(
+        fs::read_dir(tincan_home.join("projects")).unwrap().count(),
+        0
+    );
+    let plan_after_unregister = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&moved)
+        .arg("plan")
+        .output()
+        .unwrap();
+    assert!(plan_after_unregister.status.success());
+    assert_eq!(
+        fs::read_dir(tincan_home.join("projects")).unwrap().count(),
+        0
+    );
+    let reregistered = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .arg("init")
+        .arg(&moved)
+        .output()
+        .unwrap();
+    assert!(reregistered.status.success());
+    assert_eq!(
+        fs::read_dir(tincan_home.join("projects")).unwrap().count(),
+        1
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn cross_project_review_reports_broken_projects_and_registry_entries() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("tincan-cli-partial-review-{unique}"));
+    let tincan_home = root.join("personal-tincan");
+    let healthy = root.join("healthy");
+    let broken = root.join("broken");
+    for project in [&healthy, &broken] {
+        fs::create_dir_all(project).unwrap();
+        let output = tincan()
+            .env("TINCAN_HOME", &tincan_home)
+            .arg("init")
+            .arg(project)
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    fs::write(
+        healthy.join(".tincan/journal/2025-08-05.md"),
+        "---\nid: \"journal-2025-08-05\"\ntype: \"journal\"\ncreated_at: \"2025-08-05T09:00:00Z\"\n---\n\n# 2025-08-05\n\n## Done\n\n- Healthy project remains visible\n",
+    )
+    .unwrap();
+    fs::write(
+        broken.join(".tincan/journal/not-a-date.md"),
+        "---\nid: \"journal-not-a-date\"\ntype: \"journal\"\ncreated_at: \"not-a-date\"\n---\n\n# not-a-date\n",
+    )
+    .unwrap();
+    fs::write(
+        tincan_home
+            .join("projects")
+            .join("019fd6d9-1ff8-7082-9f86-2b7d89712a57.path"),
+        "path-v1\nnot-hex\n",
+    )
+    .unwrap();
+
+    let review = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&root)
+        .args(["review", "--year", "2025", "--all-projects"])
+        .output()
+        .unwrap();
+    assert!(review.status.success());
+    let content = String::from_utf8(review.stdout).unwrap();
+    assert!(content.contains("Healthy project remains visible"));
+    assert!(content.contains("## Unavailable projects"));
+    assert!(content.contains("Invalid registry entry"));
+    assert!(content.contains("invalid review date"));
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn duplicate_live_workspace_ids_are_not_silently_relocated() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("tincan-cli-duplicate-id-{unique}"));
+    let tincan_home = root.join("personal-tincan");
+    let original = root.join("original");
+    let copied = root.join("copied");
+    fs::create_dir_all(&original).unwrap();
+    let init = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .arg("init")
+        .arg(&original)
+        .output()
+        .unwrap();
+    assert!(init.status.success());
+    fs::create_dir_all(copied.join(".tincan")).unwrap();
+    fs::copy(
+        original.join(".tincan/config.toml"),
+        copied.join(".tincan/config.toml"),
+    )
+    .unwrap();
+    fs::copy(
+        original.join(".tincan/plan.md"),
+        copied.join(".tincan/plan.md"),
+    )
+    .unwrap();
+
+    let result = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&copied)
+        .arg("plan")
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert!(
+        String::from_utf8(result.stderr)
+            .unwrap()
+            .contains("appears to have been copied rather than moved")
+    );
+    let projects = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .arg("projects")
+        .output()
+        .unwrap();
+    let listed = String::from_utf8(projects.stdout).unwrap();
+    assert!(listed.contains("original"));
+    assert!(!listed.contains("\\copied") && !listed.contains("/copied"));
+
+    let reinitialize_copy = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .arg("init")
+        .arg(&copied)
+        .output()
+        .unwrap();
+    assert!(reinitialize_copy.status.success());
+    assert_ne!(workspace_id(&original), workspace_id(&copied));
+    assert_eq!(
+        fs::read_dir(tincan_home.join("projects")).unwrap().count(),
+        2
+    );
+
+    fs::remove_dir_all(root).unwrap();
+}
+
+#[test]
+fn path_unregistration_does_not_assign_an_id_to_a_legacy_workspace() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let root = std::env::temp_dir().join(format!("tincan-cli-legacy-unregister-{unique}"));
+    let tincan_home = root.join("personal-tincan");
+    fs::create_dir_all(root.join(".tincan")).unwrap();
+    let config = root.join(".tincan/config.toml");
+    let original = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
+    fs::write(&config, original).unwrap();
+
+    let result = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .args(["projects", "unregister"])
+        .arg(&root)
+        .output()
+        .unwrap();
+    assert!(!result.status.success());
+    assert_eq!(fs::read_to_string(config).unwrap(), original);
+
+    fs::remove_dir_all(root).unwrap();
 }
 
 #[test]

@@ -29,9 +29,21 @@ workspace may contain zero, one, or several Git repositories.
 When the user asks for a project retrospective or a review of work over time,
 run bare `tincan review` first to inspect the recorded date span and yearly
 counts. Then request only the useful calendar context with `review --year
-YEAR`, `review month`, `review quarter`, or `review half`; use `review all`
+YEAR`, `review --month YYYY-MM`, `review --quarter YYYY-QN`, or `review --half
+YYYY-HN`; use `review --all-time`
 only when the overview shows that loading every record is reasonable or the
-user explicitly requests all history.
+user explicitly requests all history. Add `--all-projects` only when the user
+requests a cross-project review.
+
+If a cross-project review reports unavailable workspaces, do not remove them
+automatically because a path may have moved or be temporarily disconnected.
+Use `tincan projects` to show registry state. When the user asks to clean it up,
+use `tincan projects unregister PATH_OR_ID`. Unregistering changes only personal
+discovery state and never deletes project `.tincan/` memory; rerunning `tincan
+init PATH` explicitly registers that workspace again. If Tincan reports the
+same workspace ID at two live paths, ask the user which location is the original
+instead of treating the copy as a move. With approval, run `tincan init PATH` on
+the copy to assign it a new ID and register it separately.
 
 Tincan returns deterministic source context, not an interpretation. Summarize
 that context for the user's stated purpose, distinguish recorded evidence from

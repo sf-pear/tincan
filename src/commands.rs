@@ -27,6 +27,8 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         }
         Command::Init { repo } => init(repo),
         Command::Review(args) => review(args),
+        Command::ProjectsList => projects_list(),
+        Command::ProjectsUnregister { target } => projects_unregister(target.as_deref()),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Plan { repo } => plan(repo),
@@ -157,6 +159,7 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
     let root = workspace::target(&path)?;
     let excluded = git::protect_workspace(&root)?;
     let tincan = store::initialize(&root)?;
+    store::register_workspace(&root)?;
     branding::print();
     println!("Initialized Tincan at {}", display_path(&tincan));
     match excluded {
@@ -170,7 +173,13 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
 }
 
 fn review(args: ReviewArgs) -> Result<(), String> {
-    let root = workspace::find(&args.repo)?;
+    if args.all_projects {
+        if let Some(root) = workspace::find_optional(&args.repo)? {
+            store::reconcile_workspace(&root)?;
+        }
+        return review_all_projects(&args);
+    }
+    let root = find_workspace(&args.repo)?;
     let documents = store::scan(&root)?;
     let dated = documents
         .iter()
@@ -179,12 +188,168 @@ fn review(args: ReviewArgs) -> Result<(), String> {
     let content = match args.scope {
         ReviewScope::Overview => render_review_overview(&dated),
         scope => {
-            let today = Local::now().date_naive();
-            let (range, label) = review_range(&scope, args.year, today)?;
+            let (range, label) = review_range(&scope)?;
             render_review_context(&dated, range, &label)
         }
     };
     write_review_output(&content, args.output.as_deref(), args.force)
+}
+
+fn projects_list() -> Result<(), String> {
+    let (mut workspaces, problems) = store::registered_workspaces_with_problems()?;
+    if workspaces.is_empty() && problems.is_empty() {
+        println!("No registered Tincan projects.");
+        return Ok(());
+    }
+    sort_registered_workspaces(&mut workspaces);
+    for registered in workspaces {
+        let status = if store::registered_workspace_is_available(&registered) {
+            "available"
+        } else {
+            "unavailable"
+        };
+        println!("{}  {status}", registered.id);
+        println!("  {}", display_path(&registered.path));
+    }
+    for problem in problems {
+        println!("invalid  unavailable");
+        println!("  {problem}");
+    }
+    Ok(())
+}
+
+fn projects_unregister(target: Option<&str>) -> Result<(), String> {
+    let target = target
+        .ok_or_else(|| "projects unregister requires a project path or workspace ID".to_string())?;
+    let id = if Uuid::parse_str(target).is_ok() {
+        target.to_string()
+    } else {
+        let root = workspace::find(std::path::Path::new(target))?;
+        store::registered_workspaces_with_problems()?
+            .0
+            .into_iter()
+            .find(|workspace| workspace.path == root)
+            .map(|workspace| workspace.id)
+            .ok_or_else(|| format!("no registered Tincan project at {}", root.display()))?
+    };
+    unregister_project(&id)
+}
+
+fn unregister_project(id: &str) -> Result<(), String> {
+    let Some(path) = store::remove_registered_workspace(id)? else {
+        return Err(format!("no registered Tincan project with id {id}"));
+    };
+    println!("Removed project registration: {}", display_path(&path));
+    println!("Project files and journals were not changed.");
+    Ok(())
+}
+
+fn sort_registered_workspaces(workspaces: &mut [store::RegisteredWorkspace]) {
+    workspaces.sort_by(|left, right| {
+        store::registered_workspace_is_available(left)
+            .cmp(&store::registered_workspace_is_available(right))
+            .then(left.path.cmp(&right.path))
+    });
+}
+
+fn find_workspace(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
+    let root = workspace::find(path)?;
+    store::reconcile_workspace(&root)?;
+    Ok(root)
+}
+
+fn review_all_projects(args: &ReviewArgs) -> Result<(), String> {
+    let (workspaces, registry_problems) = store::registered_workspaces_with_problems()?;
+    if workspaces.is_empty() && registry_problems.is_empty() {
+        return Err(
+            "no registered Tincan projects; run `tincan init` in a project first".to_string(),
+        );
+    }
+    let mut sections = Vec::new();
+    let mut unavailable = registry_problems
+        .into_iter()
+        .map(|problem| format!("- Invalid registry entry: {problem}"))
+        .collect::<Vec<_>>();
+    let label = if args.scope == ReviewScope::Overview {
+        "history overview".to_string()
+    } else {
+        review_range(&args.scope)?.1
+    };
+    for registered in workspaces {
+        let name = registered
+            .path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("Unnamed project");
+        if !store::registered_workspace_is_available(&registered) {
+            unavailable.push(format!("- {name}: {}", display_path(&registered.path)));
+            continue;
+        }
+        let documents = match store::scan(&registered.path) {
+            Ok(documents) => documents,
+            Err(error) => {
+                unavailable.push(format!(
+                    "- {name}: {} ({error})",
+                    display_path(&registered.path)
+                ));
+                continue;
+            }
+        };
+        let dated = match documents
+            .iter()
+            .map(|document| review_date(document).map(|date| (date, document)))
+            .collect::<Result<Vec<_>, _>>()
+        {
+            Ok(dated) => dated,
+            Err(error) => {
+                unavailable.push(format!(
+                    "- {name}: {} ({error})",
+                    display_path(&registered.path)
+                ));
+                continue;
+            }
+        };
+        let project_content = match args.scope {
+            ReviewScope::Overview => render_review_overview(&dated),
+            _ => {
+                let (range, _) = review_range(&args.scope)?;
+                render_review_context(&dated, range, &label)
+            }
+        };
+        sections.push(render_project_review_section(
+            name,
+            &registered.path,
+            &project_content,
+        ));
+    }
+    let mut content = format!("# Tincan review: {label} — all projects\n");
+    for section in sections {
+        content.push_str(&section);
+    }
+    if !unavailable.is_empty() {
+        content.push_str("\n## Unavailable projects\n\n");
+        content.push_str(&unavailable.join("\n"));
+        content.push_str(
+            "\n\nMoved projects reconnect when Tincan runs from the new location. Use `tincan projects` to inspect registry problems.\n",
+        );
+    }
+    write_review_output(&content, args.output.as_deref(), args.force)
+}
+
+fn render_project_review_section(name: &str, path: &std::path::Path, content: &str) -> String {
+    let mut output = format!("\n## {name}\n\nPath: {}\n", display_path(path));
+    for (index, line) in content.lines().enumerate() {
+        if index == 0 && line.starts_with("# Tincan review:") {
+            continue;
+        }
+        output.push('\n');
+        if line.starts_with('#') {
+            output.push('#');
+        }
+        output.push_str(line);
+    }
+    output.push('\n');
+    output
 }
 
 #[derive(Default)]
@@ -218,50 +383,40 @@ fn render_review_overview(dated: &[(NaiveDate, &store::Document)]) -> String {
         ));
     }
     output.push_str(
-        "\nUse:\n  tincan review month 6\n  tincan review --year 2025\n  tincan review quarter 3 --year 2025\n  tincan review all\n",
+        "\nUse:\n  tincan review --month 2025-06\n  tincan review --year 2025\n  tincan review --quarter 2025-Q3\n  tincan review --all-time\n",
     );
     output
 }
 
-fn review_range(
-    scope: &ReviewScope,
-    requested_year: Option<i32>,
-    today: NaiveDate,
-) -> Result<(Option<(NaiveDate, NaiveDate)>, String), String> {
-    let year = requested_year.unwrap_or_else(|| today.year());
+fn review_range(scope: &ReviewScope) -> Result<(Option<(NaiveDate, NaiveDate)>, String), String> {
     match scope {
-        ReviewScope::All if requested_year.is_none() => Ok((None, "all history".to_string())),
-        ReviewScope::All => Ok((
-            Some((date(year, 1, 1)?, date(year, 12, 31)?)),
+        ReviewScope::AllTime => Ok((None, "all history".to_string())),
+        ReviewScope::Year(year) => Ok((
+            Some((date(*year, 1, 1)?, date(*year, 12, 31)?)),
             year.to_string(),
         )),
-        ReviewScope::Month(number) => {
-            let month = number.unwrap_or_else(|| today.month());
-            Ok((
-                Some((date(year, month, 1)?, last_day_of_month(year, month)?)),
-                format!("{year}-{month:02}"),
-            ))
-        }
-        ReviewScope::Quarter(number) => {
-            let quarter = number.unwrap_or_else(|| (today.month() - 1) / 3 + 1);
+        ReviewScope::Month(year, month) => Ok((
+            Some((date(*year, *month, 1)?, last_day_of_month(*year, *month)?)),
+            format!("{year}-{month:02}"),
+        )),
+        ReviewScope::Quarter(year, quarter) => {
             let start_month = (quarter - 1) * 3 + 1;
             let end_month = start_month + 2;
             Ok((
                 Some((
-                    date(year, start_month, 1)?,
-                    last_day_of_month(year, end_month)?,
+                    date(*year, start_month, 1)?,
+                    last_day_of_month(*year, end_month)?,
                 )),
                 format!("{year} Q{quarter}"),
             ))
         }
-        ReviewScope::Half(number) => {
-            let half = number.unwrap_or_else(|| if today.month() <= 6 { 1 } else { 2 });
-            let start_month = if half == 1 { 1 } else { 7 };
-            let end_month = if half == 1 { 6 } else { 12 };
+        ReviewScope::Half(year, half) => {
+            let start_month = if *half == 1 { 1 } else { 7 };
+            let end_month = if *half == 1 { 6 } else { 12 };
             Ok((
                 Some((
-                    date(year, start_month, 1)?,
-                    last_day_of_month(year, end_month)?,
+                    date(*year, start_month, 1)?,
+                    last_day_of_month(*year, end_month)?,
                 )),
                 format!("{year} H{half}"),
             ))
@@ -429,7 +584,7 @@ fn record(args: RecordArgs) -> Result<(), String> {
     if args.kind != "decision" && !args.supersedes.is_empty() {
         return Err("--supersedes can only be used with a decision".to_string());
     }
-    let root = workspace::find(&args.repo)?;
+    let root = find_workspace(&args.repo)?;
     let kind = Kind::parse(&args.kind)?;
     let id = Uuid::now_v7().to_string();
     let created_at = Local::now().to_rfc3339_opts(SecondsFormat::Secs, true);
@@ -472,7 +627,7 @@ fn record(args: RecordArgs) -> Result<(), String> {
 }
 
 fn journal(args: JournalArgs) -> Result<(), String> {
-    let root = workspace::find(&args.repo)?;
+    let root = find_workspace(&args.repo)?;
     store::require(&root)?;
     let now = Local::now();
     let date = now.format("%Y-%m-%d").to_string();
@@ -494,7 +649,7 @@ fn journal(args: JournalArgs) -> Result<(), String> {
 }
 
 fn resume(path: std::path::PathBuf) -> Result<(), String> {
-    let root = workspace::find(&path)?;
+    let root = find_workspace(&path)?;
     print_plan(&root)?;
     let Some((journal_path, content)) = store::latest_journal(&root)? else {
         println!();
@@ -508,7 +663,7 @@ fn resume(path: std::path::PathBuf) -> Result<(), String> {
 }
 
 fn plan(path: std::path::PathBuf) -> Result<(), String> {
-    let root = workspace::find(&path)?;
+    let root = find_workspace(&path)?;
     print_plan(&root)
 }
 
@@ -546,7 +701,7 @@ fn show(path: std::path::PathBuf, id: &str) -> Result<(), String> {
 }
 
 fn lift(path: std::path::PathBuf, id: &str, from: &std::path::Path) -> Result<(), String> {
-    let root = workspace::find(&path)?;
+    let root = find_workspace(&path)?;
     let source = store::scan(&root)?
         .into_iter()
         .find(|document| document.id == id)
@@ -599,7 +754,10 @@ fn read_lift_body(path: &std::path::Path) -> Result<String, String> {
 
 fn lookup_documents(path: &std::path::Path) -> Result<Vec<store::Document>, String> {
     let mut documents = match workspace::find_optional(path)? {
-        Some(root) => store::scan(&root)?,
+        Some(root) => {
+            store::reconcile_workspace(&root)?;
+            store::scan(&root)?
+        }
         None => Vec::new(),
     };
     documents.extend(store::scan_global()?);
@@ -687,7 +845,7 @@ fn matching_excerpt(document: &store::Document, query: &str) -> Option<String> {
 }
 
 fn changes(path: std::path::PathBuf) -> Result<(), String> {
-    let root = workspace::find(&path)?;
+    let root = find_workspace(&path)?;
     let Some(changed) = git::workspace_changed_files(&root)? else {
         println!("No Git repositories found in this Tincan workspace.");
         return Ok(());
@@ -804,8 +962,8 @@ mod tests {
         assert!(output.contains("Review history: 2025-02-03 through 2026-01-10"));
         assert!(output.contains("2025              1           1           0"));
         assert!(output.contains("2026              0           0           1"));
-        assert!(output.contains("tincan review month 6"));
-        assert!(output.contains("tincan review all"));
+        assert!(output.contains("tincan review --month 2025-06"));
+        assert!(output.contains("tincan review --all-time"));
     }
 
     #[test]
@@ -827,12 +985,7 @@ mod tests {
             .iter()
             .map(|document| (review_date(document).unwrap(), document))
             .collect::<Vec<_>>();
-        let (range, label) = review_range(
-            &ReviewScope::Quarter(Some(3)),
-            Some(2025),
-            NaiveDate::from_ymd_opt(2026, 8, 27).unwrap(),
-        )
-        .unwrap();
+        let (range, label) = review_range(&ReviewScope::Quarter(2025, 3)).unwrap();
 
         let output = render_review_context(&dated, range, &label);
 

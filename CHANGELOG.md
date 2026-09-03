@@ -4,13 +4,16 @@ All notable changes to Tincan will be documented in this file.
 
 The format follows Keep a Changelog and versions follow Semantic Versioning.
 
-## [Unreleased]
+## [0.6.0] - 2026-09-03
 
 ### Added
 
-- Add `review` with a compact year-by-year history overview and explicit all,
-  year, month, quarter, and half-year context selection, including protected
-  Markdown file output.
+- Add `review` with a compact year-by-year history overview, explicit time
+  selection, protected Markdown file output, and optional cross-project review
+  through a small personal workspace registry. Moved paths reconnect when the
+  old location is unavailable, while live duplicate IDs are reported.
+- Add registry inspection and explicit path- or ID-based unregistration that
+  never changes project-local `.tincan` memory.
 
 ### Changed
 

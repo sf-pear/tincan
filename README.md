@@ -69,12 +69,19 @@ tincan journal --done "Implemented the compact gallery read model" `
 
 tincan search "gallery"
 tincan review
+tincan review --year 2025 --all-projects
 tincan changes
 ```
 
 Commands find the nearest parent `.tincan/`. One workspace can therefore
 contain zero, one, or several Git repositories. Pass `-d <path>` or
 `--directory <path>` to start discovery from another directory.
+`init` also registers the workspace by stable ID in personal Tincan storage.
+This lets `review --all-projects` read each project's canonical records without
+copying them centrally. Run `tincan projects` to inspect registered paths and
+`tincan projects unregister PATH_OR_ID` to forget one registration without
+changing any project's `.tincan/` directory. The registry stores only stable
+IDs and absolute paths under `~/.tincan/projects/` (or `TINCAN_HOME/projects/`).
 
 ## Storage
 

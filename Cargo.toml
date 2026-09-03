@@ -1,6 +1,6 @@
 [package]
 name = "tincan-cli"
-version = "0.5.0"
+version = "0.6.0"
 edition = "2024"
 description = "Preserve development plans, decisions, learnings, and progress in plain Markdown"
 license = "MIT"
@@ -26,6 +26,9 @@ chrono = { version = "0.4.45", default-features = false, features = ["clock"] }
 console = "0.16.4"
 dialoguer = { version = "0.12.0", default-features = false }
 uuid = { version = "1.24.0", features = ["v7"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.61.2", features = ["Win32_Storage_FileSystem"] }
 
 [[bin]]
 name = "tincan"

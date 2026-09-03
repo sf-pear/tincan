@@ -54,7 +54,9 @@ shows the complete Tincan skill path, and omits installations already current.
 | `show UUID` | Print one complete project or global record. |
 | `lift UUID --from FILE` | Save an approved generalized global learning. |
 | `review` | Show historical coverage and yearly record counts. |
-| `review SCOPE` | Print or save deterministic context for a retrospective. |
+| `review TIME_OPTION` | Print or save deterministic context for a retrospective. |
+| `projects` | List registered workspaces and whether their paths are available. |
+| `projects unregister PATH|UUID` | Forget one registration without changing project files. |
 | `changes` | Match changed files across nested Git repos to records linked by `--file`. |
 | `skill install` | Install the agent workflow into selected harnesses. |
 | `skill status` | Check whether detected Agent Skill installations are current. |
@@ -87,24 +89,38 @@ Run `tincan --help` for complete syntax.
 ## Review
 
 `review` keeps historical selection useful with or without an agent. With no
-scope it shows the first and last recorded dates plus journal-day, decision,
-and learning counts for each year. Explicit scopes return readable Markdown
+time option it shows the first and last recorded dates plus journal-day,
+decision, and learning counts for each year. Explicit time options return readable Markdown
 from the matching project records without calling a model or storing a derived
 summary.
 
 ```powershell
 tincan review
-tincan review all
 tincan review --year 2025
-tincan review month 8 --year 2025
-tincan review quarter 3 --year 2025
-tincan review half 2 --year 2025 --output review-2025-h2.md
+tincan review --month 2025-08
+tincan review --quarter 2025-Q3
+tincan review --half 2025-H2 --output review-2025-h2.md
+tincan review --all-time
+tincan review --year 2025 --all-projects
 ```
 
-Month, quarter, and half-year selectors use the current calendar period when
-their number is omitted and the current year when `--year` is omitted. Output
-prints to the terminal by default. `--output FILE` creates a Markdown file and
+Time options are mutually exclusive and explicit. The current project is the
+default; `--all-projects` reads records directly from every registered
+workspace. `init` registers a stable workspace ID, and running any project
+command after moving a workspace reconnects its path when the old location is
+unavailable. If both locations still exist with the same ID, Tincan reports a
+copy conflict instead of guessing; run `tincan init PATH` on the copy to assign
+it a new ID. Unavailable or unreadable projects are skipped and reported.
+Output prints to the terminal by default. `--output FILE` creates a Markdown file and
 refuses to replace an existing file unless `--force` is also provided.
+
+Use `tincan projects` to inspect the registry, then run `tincan projects
+unregister PATH_OR_ID` to remove one entry. Unregistering never changes the
+project's `.tincan/` directory. Later commands update the path of a registered
+project but do not re-register one that was explicitly unregistered; rerun
+`init` to register it. The registry contains stable IDs and absolute project
+paths under `~/.tincan/projects/`, or `TINCAN_HOME/projects/` when configured;
+it never contains copies of project records.
 
 `review` replaces the former `summary` command. Use `search` and `show` when
 looking for a specific record rather than a calendar period.

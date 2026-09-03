@@ -1,7 +1,9 @@
 use crate::model::{DecisionStatus, Kind};
+use std::ffi::{OsStr, OsString};
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
+use uuid::Uuid;
 
 const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
 const CONFIG: &str = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
@@ -40,6 +42,23 @@ pub struct Document {
     pub scope: Scope,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RegisteredWorkspace {
+    pub id: String,
+    pub path: PathBuf,
+}
+
+#[derive(Debug)]
+struct RegistryLock {
+    path: PathBuf,
+}
+
+impl Drop for RegistryLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
     let root = repo.join(".tincan");
     fs::create_dir_all(&root)
@@ -61,6 +80,410 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
             .map_err(|error| format!("cannot write {}: {error}", plan.display()))?;
     }
     Ok(root)
+}
+
+pub fn register_workspace(repo: &Path) -> Result<String, String> {
+    let config = repo.join(".tincan/config.toml");
+    validate_config(&config)?;
+    let directory = personal_tincan_root()?.join("projects");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let _lock = lock_registry(&directory)?;
+    let (mut id, _) = ensure_workspace_id(&config)?;
+    let existing_entry = directory.join(format!("{id}.path"));
+    if let Some(previous) = read_workspace_entry(&existing_entry)? {
+        if previous != repo && workspace_at_path_has_id(&previous, &id) {
+            id = replace_workspace_id(&config)?;
+        }
+    }
+    write_workspace_entry(&directory, &id, repo)?;
+    remove_other_registrations_for_path(&directory, &id, repo)?;
+    Ok(id)
+}
+
+pub fn reconcile_workspace(repo: &Path) -> Result<String, String> {
+    let config = repo.join(".tincan/config.toml");
+    validate_config(&config)?;
+    let directory = personal_tincan_root()?.join("projects");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let _lock = lock_registry(&directory)?;
+    let (id, created) = ensure_workspace_id(&config)?;
+    let entry = directory.join(format!("{id}.path"));
+    if created || entry.is_file() {
+        if let Some(previous) = read_workspace_entry(&entry)? {
+            if previous != repo && workspace_at_path_has_id(&previous, &id) {
+                return Err(format!(
+                    "workspace ID {id} is already active at {}; the workspace appears to have been copied rather than moved; run `tincan init {}` to assign this copy a new ID",
+                    previous.display(),
+                    repo.display()
+                ));
+            }
+        }
+        write_workspace_entry(&directory, &id, repo)?;
+        remove_other_registrations_for_path(&directory, &id, repo)?;
+    }
+    Ok(id)
+}
+
+fn write_workspace_entry(directory: &Path, id: &str, repo: &Path) -> Result<(), String> {
+    let entry = directory.join(format!("{id}.path"));
+    if read_workspace_entry(&entry)?.as_deref() != Some(repo) {
+        atomic_write(&entry, encode_registry_path(repo).as_bytes())
+            .map_err(|error| format!("cannot register workspace {}: {error}", repo.display()))?;
+    }
+    Ok(())
+}
+
+fn lock_registry(directory: &Path) -> Result<RegistryLock, String> {
+    let path = directory.join("registry.lock");
+    for attempt in 0..2 {
+        match fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&path)
+        {
+            Ok(mut file) => {
+                if let Err(error) = writeln!(file, "{}", std::process::id()) {
+                    let _ = fs::remove_file(&path);
+                    return Err(format!(
+                        "cannot write project registry lock {}: {error}",
+                        path.display()
+                    ));
+                }
+                return Ok(RegistryLock { path });
+            }
+            Err(error)
+                if error.kind() == std::io::ErrorKind::AlreadyExists
+                    && attempt == 0
+                    && registry_lock_is_stale(&path) =>
+            {
+                fs::remove_file(&path).map_err(|error| {
+                    format!("cannot remove stale project registry lock: {error}")
+                })?;
+            }
+            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {
+                return Err(
+                    "another Tincan process is updating the project registry; retry shortly"
+                        .to_string(),
+                );
+            }
+            Err(error) => {
+                return Err(format!(
+                    "cannot lock project registry {}: {error}",
+                    directory.display()
+                ));
+            }
+        }
+    }
+    unreachable!()
+}
+
+fn registry_lock_is_stale(path: &Path) -> bool {
+    fs::metadata(path)
+        .and_then(|metadata| metadata.modified())
+        .ok()
+        .and_then(|modified| modified.elapsed().ok())
+        .is_some_and(|age| age > std::time::Duration::from_secs(60))
+}
+
+fn atomic_write(path: &Path, content: &[u8]) -> Result<(), std::io::Error> {
+    let temporary = path.with_extension(format!("tmp-{}", Uuid::now_v7()));
+    let mut file = fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)?;
+    if let Err(error) = file.write_all(content).and_then(|_| file.sync_all()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    drop(file);
+    if let Err(error) = replace_file(&temporary, path) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    Ok(())
+}
+
+#[cfg(not(windows))]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    fs::rename(temporary, destination)
+}
+
+#[cfg(windows)]
+fn replace_file(temporary: &Path, destination: &Path) -> Result<(), std::io::Error> {
+    use std::os::windows::ffi::OsStrExt;
+    use windows_sys::Win32::Storage::FileSystem::ReplaceFileW;
+
+    if !destination.exists() {
+        return fs::rename(temporary, destination);
+    }
+    let destination = destination
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let temporary = temporary
+        .as_os_str()
+        .encode_wide()
+        .chain(Some(0))
+        .collect::<Vec<_>>();
+    let replaced = unsafe {
+        ReplaceFileW(
+            destination.as_ptr(),
+            temporary.as_ptr(),
+            std::ptr::null(),
+            0,
+            std::ptr::null_mut(),
+            std::ptr::null_mut(),
+        )
+    };
+    if replaced == 0 {
+        Err(std::io::Error::last_os_error())
+    } else {
+        Ok(())
+    }
+}
+
+fn remove_other_registrations_for_path(
+    directory: &Path,
+    current_id: &str,
+    repo: &Path,
+) -> Result<(), String> {
+    for workspace in registered_workspaces_with_problems_in(directory)?.0 {
+        if workspace.id != current_id && workspace.path == repo {
+            fs::remove_file(directory.join(format!("{}.path", workspace.id))).map_err(|error| {
+                format!(
+                    "cannot replace stale registration for {}: {error}",
+                    repo.display()
+                )
+            })?;
+        }
+    }
+    Ok(())
+}
+
+pub fn registered_workspaces_with_problems()
+-> Result<(Vec<RegisteredWorkspace>, Vec<String>), String> {
+    registered_workspaces_with_problems_in(&personal_tincan_root()?.join("projects"))
+}
+
+fn registered_workspaces_with_problems_in(
+    directory: &Path,
+) -> Result<(Vec<RegisteredWorkspace>, Vec<String>), String> {
+    let entries = match fs::read_dir(directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok((Vec::new(), Vec::new()));
+        }
+        Err(error) => return Err(format!("cannot read {}: {error}", directory.display())),
+    };
+    let mut workspaces = Vec::new();
+    let mut problems = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("cannot read workspace registry: {error}"))?;
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) != Some("path") {
+            continue;
+        }
+        let Some(id) = path.file_stem().and_then(|value| value.to_str()) else {
+            continue;
+        };
+        if Uuid::parse_str(id).is_err() {
+            continue;
+        }
+        match read_workspace_entry(&path) {
+            Ok(Some(registered_path)) => workspaces.push(RegisteredWorkspace {
+                id: id.to_string(),
+                path: registered_path,
+            }),
+            Ok(None) => problems.push(format!("{} is empty", path.display())),
+            Err(error) => problems.push(error),
+        }
+    }
+    workspaces.sort_by(|left, right| left.id.cmp(&right.id));
+    Ok((workspaces, problems))
+}
+
+pub fn registered_workspace_is_available(workspace: &RegisteredWorkspace) -> bool {
+    let config = workspace.path.join(".tincan/config.toml");
+    fs::read_to_string(config)
+        .ok()
+        .and_then(|content| config_string(&content, "workspace_id"))
+        .is_some_and(|id| id == workspace.id)
+}
+
+pub fn remove_registered_workspace(id: &str) -> Result<Option<PathBuf>, String> {
+    let directory = personal_tincan_root()?.join("projects");
+    fs::create_dir_all(&directory)
+        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
+    let _lock = lock_registry(&directory)?;
+    let entry = directory.join(format!("{id}.path"));
+    let Some(registered_path) = read_workspace_entry(&entry)? else {
+        return Ok(None);
+    };
+    fs::remove_file(&entry)
+        .map_err(|error| format!("cannot remove {}: {error}", entry.display()))?;
+    Ok(Some(registered_path))
+}
+
+fn read_workspace_id(config: &Path) -> Result<Option<String>, String> {
+    let content = fs::read_to_string(config)
+        .map_err(|error| format!("cannot read {}: {error}", config.display()))?;
+    let Some(value) = config_string(&content, "workspace_id") else {
+        return Ok(None);
+    };
+    Uuid::parse_str(&value).map_err(|_| {
+        format!(
+            "{} contains an invalid workspace_id: {value}",
+            config.display()
+        )
+    })?;
+    Ok(Some(value))
+}
+
+fn ensure_workspace_id(config: &Path) -> Result<(String, bool), String> {
+    let mut content = fs::read_to_string(config)
+        .map_err(|error| format!("cannot read {}: {error}", config.display()))?;
+    if let Some(value) = config_string(&content, "workspace_id") {
+        Uuid::parse_str(&value).map_err(|_| {
+            format!(
+                "{} contains an invalid workspace_id: {value}",
+                config.display()
+            )
+        })?;
+        return Ok((value, false));
+    }
+    let id = Uuid::now_v7().to_string();
+    if !content.ends_with('\n') {
+        content.push('\n');
+    }
+    content.push_str(&format!("workspace_id = \"{id}\"\n"));
+    atomic_write(config, content.as_bytes())
+        .map_err(|error| format!("cannot write {}: {error}", config.display()))?;
+    Ok((id, true))
+}
+
+fn replace_workspace_id(config: &Path) -> Result<String, String> {
+    let content = fs::read_to_string(config)
+        .map_err(|error| format!("cannot read {}: {error}", config.display()))?;
+    let id = Uuid::now_v7().to_string();
+    let mut replaced = false;
+    let mut output = String::new();
+    for line in content.lines() {
+        if line
+            .split_once('=')
+            .is_some_and(|(candidate, _)| candidate.trim() == "workspace_id")
+        {
+            output.push_str(&format!("workspace_id = \"{id}\"\n"));
+            replaced = true;
+        } else {
+            output.push_str(line);
+            output.push('\n');
+        }
+    }
+    if !replaced {
+        output.push_str(&format!("workspace_id = \"{id}\"\n"));
+    }
+    atomic_write(config, output.as_bytes())
+        .map_err(|error| format!("cannot write {}: {error}", config.display()))?;
+    Ok(id)
+}
+
+fn workspace_at_path_has_id(repo: &Path, id: &str) -> bool {
+    read_workspace_id(&repo.join(".tincan/config.toml"))
+        .ok()
+        .flatten()
+        .is_some_and(|candidate| candidate == id)
+}
+
+fn read_workspace_entry(path: &Path) -> Result<Option<PathBuf>, String> {
+    let content = match fs::read(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    if content.is_empty() {
+        return Ok(None);
+    }
+    decode_registry_path(&content)
+        .map(Some)
+        .map_err(|error| format!("invalid registry entry {}: {error}", path.display()))
+}
+
+fn encode_registry_path(path: &Path) -> String {
+    let bytes = os_str_bytes(path.as_os_str());
+    let mut output = String::from("path-v1\n");
+    for byte in bytes {
+        output.push_str(&format!("{byte:02x}"));
+    }
+    output.push('\n');
+    output
+}
+
+fn decode_registry_path(content: &[u8]) -> Result<PathBuf, String> {
+    if let Some(hex) = content.strip_prefix(b"path-v1\n") {
+        let hex = hex.strip_suffix(b"\n").unwrap_or(hex);
+        if hex.len() % 2 != 0 || !hex.iter().all(u8::is_ascii_hexdigit) {
+            return Err("invalid path-v1 encoding".to_string());
+        }
+        let bytes = hex
+            .chunks_exact(2)
+            .map(|pair| {
+                let text = std::str::from_utf8(pair).unwrap();
+                u8::from_str_radix(text, 16).unwrap()
+            })
+            .collect::<Vec<_>>();
+        return os_string_from_bytes(bytes).map(PathBuf::from);
+    }
+    let legacy =
+        std::str::from_utf8(content).map_err(|_| "legacy path is not valid UTF-8".to_string())?;
+    Ok(PathBuf::from(legacy.strip_suffix('\n').unwrap_or(legacy)))
+}
+
+#[cfg(unix)]
+fn os_str_bytes(value: &OsStr) -> Vec<u8> {
+    use std::os::unix::ffi::OsStrExt;
+    value.as_bytes().to_vec()
+}
+
+#[cfg(unix)]
+fn os_string_from_bytes(value: Vec<u8>) -> Result<OsString, String> {
+    use std::os::unix::ffi::OsStringExt;
+    Ok(OsString::from_vec(value))
+}
+
+#[cfg(windows)]
+fn os_str_bytes(value: &OsStr) -> Vec<u8> {
+    use std::os::windows::ffi::OsStrExt;
+    value.encode_wide().flat_map(u16::to_le_bytes).collect()
+}
+
+#[cfg(windows)]
+fn os_string_from_bytes(value: Vec<u8>) -> Result<OsString, String> {
+    use std::os::windows::ffi::OsStringExt;
+    if value.len() % 2 != 0 {
+        return Err("Windows path encoding has an odd byte count".to_string());
+    }
+    let wide = value
+        .chunks_exact(2)
+        .map(|pair| u16::from_le_bytes([pair[0], pair[1]]))
+        .collect::<Vec<_>>();
+    Ok(OsString::from_wide(&wide))
+}
+
+fn config_string(content: &str, key: &str) -> Option<String> {
+    content.lines().find_map(|line| {
+        let (candidate, value) = line.split_once('=')?;
+        if candidate.trim() != key {
+            return None;
+        }
+        let value = value.trim();
+        value
+            .strip_prefix('"')
+            .and_then(|value| value.strip_suffix('"'))
+            .map(str::to_string)
+    })
 }
 
 pub fn ensure_git_excluded(path: &Path, pattern: &str) -> Result<bool, String> {
@@ -448,13 +871,13 @@ fn parse_document(path: PathBuf, text: String) -> Result<Document, String> {
                 }
             }
         }
-        if let Some(source_record) = scalar(&text, "source_record")
-            && uuid::Uuid::parse_str(&source_record).is_err()
-        {
-            return Err(format!(
-                "invalid frontmatter in {}: source_record must be a UUID",
-                path.display()
-            ));
+        if let Some(source_record) = scalar(&text, "source_record") {
+            if uuid::Uuid::parse_str(&source_record).is_err() {
+                return Err(format!(
+                    "invalid frontmatter in {}: source_record must be a UUID",
+                    path.display()
+                ));
+            }
         }
     }
     let body = markdown_body(&text);
@@ -550,6 +973,10 @@ fn global_learnings_directory() -> Result<PathBuf, String> {
 
 fn personal_tincan_root() -> Result<PathBuf, String> {
     let explicit = nonempty_env_path("TINCAN_HOME");
+    #[cfg(test)]
+    if explicit.is_none() {
+        return Ok(std::env::temp_dir().join(format!("tincan-unit-tests-{}", std::process::id())));
+    }
     let user_profile = nonempty_env_path("USERPROFILE");
     let home = nonempty_env_path("HOME");
     personal_tincan_root_from(explicit, user_profile, home).ok_or_else(|| {
@@ -1027,5 +1454,35 @@ mod tests {
         );
         assert!(content.contains("## Planned\n\n- Add a plan"));
         fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn registry_path_encoding_round_trips_without_trimming() {
+        let path = PathBuf::from(" leading and trailing ");
+        let encoded = encode_registry_path(&path);
+        assert_eq!(decode_registry_path(encoded.as_bytes()).unwrap(), path);
+        assert_eq!(
+            decode_registry_path(b" legacy path \n").unwrap(),
+            PathBuf::from(" legacy path ")
+        );
+    }
+
+    #[test]
+    fn registry_lock_rejects_a_concurrent_writer() {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let directory = std::env::temp_dir().join(format!("tincan-registry-lock-{unique}"));
+        fs::create_dir_all(&directory).unwrap();
+        let first = lock_registry(&directory).unwrap();
+        assert!(
+            lock_registry(&directory)
+                .unwrap_err()
+                .contains("retry shortly")
+        );
+        drop(first);
+        assert!(lock_registry(&directory).is_ok());
+        fs::remove_dir_all(directory).unwrap();
     }
 }
