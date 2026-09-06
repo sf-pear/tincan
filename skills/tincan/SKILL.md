@@ -1,6 +1,6 @@
 ---
 name: tincan
-description: Maintain private workspace-local development continuity with Tincan's plan, daily journal, accepted decisions, and evidence-supported learnings. Use when a workspace has or could benefit from `.tincan/config.toml`, when resuming work, while meaningful project context develops, or when the user asks to wrap up, finish for today, record what was learned, or prepare to continue tomorrow.
+description: Proactively maintain focused development continuity in workspaces containing `.tincan/config.toml`, including during ordinary implementation, debugging, and design discussion—not only explicit resume or wrap-up requests. Preserve intended outcomes, meaningful handoffs, accepted decisions, evidence-supported learnings, and user-approved ideas for later without recording routine work.
 ---
 
 # Tincan
@@ -8,13 +8,29 @@ description: Maintain private workspace-local development continuity with Tincan
 Treat Markdown under `.tincan/` as canonical private project memory. A Tincan
 workspace may contain zero, one, or several Git repositories.
 
+Maintain Tincan as meaningful context emerges; do not wait for an explicit
+wrap-up. Record only context whose loss could send later work in the wrong
+direction, repeat a disproven approach, violate an accepted constraint, or lose
+an idea the user wanted preserved.
+
+Keep the kinds of memory distinct:
+
+- The plan is the small set of outcomes the user currently intends to pursue.
+- The later shelf contains possibilities worth remembering, not commitments or
+  implied direction.
+- The journal is the latest handoff: meaningful progress, open questions, and
+  the next useful starting point.
+- Decisions are accepted choices that constrain future work.
+- Learnings are evidence-supported conclusions that should change future work.
+
 ## Start work
 
 1. Find `.tincan/config.toml` in the current directory or an ancestor. If none
    exists, offer to run `tincan init <directory>` through the harness's standard
    user-question tool with `Initialize Tincan` and `Not now` choices. Never run
    `tincan init` without the user's explicit confirmation.
-2. Run `tincan resume` once to read the living plan and latest journal. Do not
+2. Run `tincan resume` once to read the living plan, later shelf, and latest
+   journal. Do not
    repeat startup commands during the same task when that context is still
    available. If `tincan` is unavailable, suggest `cargo install tincan-cli`
    and continue without Tincan.
@@ -59,15 +75,36 @@ their confirmation.
 
 ## Maintain the plan
 
-Edit `.tincan/plan.md` directly. Keep only current outcome-level work and ideas.
+Edit `.tincan/plan.md` directly. Keep only current outcome-level work.
 Do not turn it into an implementation checklist or duplicate an issue tracker.
 Remove completed items. Preserve only any resulting handoff context that would
 otherwise be lost.
 
 After meaningful project work, review the plan before handing control back.
 Change it only when the work completes, invalidates, refines, or reveals an
-outcome or idea. The plan guides current project direction; routine activity
+outcome. The plan guides current project direction; routine activity
 does not require a plan edit.
+
+## Maintain the later shelf
+
+Use `tincan remember <text>` for a small observation, possible idea, or minor
+issue that may be worth revisiting but is not an intended outcome, accepted
+decision, or evidence-supported learning. Use it without another confirmation
+when the user explicitly says to remember, save, revisit, or consider something
+later. If preserving the thought is the agent's inference, ask a lightweight
+question such as “Worth putting on the later shelf?” first. Do not record raw
+brainstorming or every passing possibility.
+
+`tincan resume` includes the shelf so possible ideas can be compared with the
+current request. Do not implement, plan, or present an item as current direction
+merely because it appears there. If an item seems relevant, mention the
+connection and ask before folding it into the current work unless the user has
+already directed that change. Use `tincan later` to view the shelf again without
+reloading the rest of the handoff.
+
+Keep `.tincan/later.md` short by removing discarded items and removing items
+promoted into the plan, a decision, or a learning. Tentative items need no audit
+trail, priority, status, assignment, or due date.
 
 ## Maintain the handoff
 
@@ -90,16 +127,22 @@ review, but does not itself require a journal entry.
 
 ## Classify memory
 
+- Record an accepted choice with `tincan decide` when the user clearly commits
+  to it. If acceptance is ambiguous or the classification requires judgment,
+  ask before recording it.
 - Journal bullets preserve only the meaningful progress, unfinished context,
   open questions, and concrete next starting point needed for a useful handoff.
   Include transient status only when it materially explains a blocker, an open
   question, why the current state matters, or where work should resume.
-- `tincan decide <statement>` records an accepted choice that constrains future
-  work. Use `--supersedes <uuid>` when replacing an active decision.
+- Use `--supersedes <uuid>` when a decision replaces an active decision.
 - `tincan learn <statement>` records an evidence-supported conclusion that
   remains useful beyond the current session. It must change a future
   implementation, debugging, review, or architectural action: what concrete
   mistake, regression, or repeated investigation will it prevent?
+
+Add one or two `--topic` values when a learning has an obvious useful domain,
+such as `react`, `rust`, or `accessibility`; do not invent or enforce a taxonomy.
+Lifted global learnings inherit the project learning's topics.
 
 Use workspace-relative `--file` paths. Let Tincan create UUIDs and frontmatter,
 then add useful detail below the generated H1. Do not record using Tincan,

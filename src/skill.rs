@@ -517,6 +517,28 @@ mod tests {
     }
 
     #[test]
+    fn bundled_skill_proactively_and_selectively_maintains_the_later_shelf() {
+        for instruction in [
+            "during ordinary implementation, debugging, and design discussion",
+            "do not wait for an explicit",
+            "tincan remember <text>",
+            "Worth putting on the later shelf?",
+            "tincan later",
+            "Tentative items need no audit",
+            "do not invent or enforce a taxonomy",
+            "inherit the project learning's topics",
+            "possibilities worth remembering, not commitments",
+            "Do not implement, plan, or present an item as current direction",
+            "connection and ask before folding it into the current work",
+        ] {
+            assert!(
+                SKILL.contains(instruction),
+                "missing instruction: {instruction}"
+            );
+        }
+    }
+
+    #[test]
     fn bundled_skill_maintains_a_sufficient_handoff_without_mirroring_git() {
         for instruction in [
             "Before handing control back after meaningful project work",

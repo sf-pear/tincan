@@ -18,6 +18,13 @@ pub enum Command {
     Plan {
         repo: PathBuf,
     },
+    Remember {
+        repo: PathBuf,
+        text: String,
+    },
+    Later {
+        repo: PathBuf,
+    },
     Resume {
         repo: PathBuf,
     },
@@ -104,6 +111,29 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
+        "remember" => {
+            let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["directory"])?;
+            values.ensure_at_most_one(&["directory"])?;
+            if values.positionals.len() != 1 {
+                return Err("remember requires exactly one item".to_string());
+            }
+            Ok(Command::Remember {
+                repo: values.directory()?,
+                text: values.positionals[0].clone(),
+            })
+        }
+        "later" => {
+            let values = Flags::parse(&args[1..])?;
+            values.ensure_only(&["directory"])?;
+            values.ensure_at_most_one(&["directory"])?;
+            if !values.positionals.is_empty() {
+                return Err("later does not accept positional arguments".to_string());
+            }
+            Ok(Command::Later {
+                repo: values.directory()?,
+            })
+        }
         "plan" => {
             let values = Flags::parse(&args[1..])?;
             values.ensure_only(&["directory"])?;
@@ -581,8 +611,11 @@ COMMANDS
   projects                      List registered workspaces and their status
   projects unregister TARGET    Forget one registration without changing projects
   plan [-d|--directory PATH]    Print the living project plan
+  remember [-d|--directory PATH] TEXT
+                                Keep one informal item for later
+  later [-d|--directory PATH]   Print the informal later shelf
   journal [OPTIONS]             Update today's concise work record
-  resume [-d|--directory PATH]  Print the living plan and latest journal
+  resume [-d|--directory PATH]  Print the plan, later shelf, and latest journal
   decide STATEMENT [OPTIONS]    Create an accepted decision record
   learn STATEMENT [OPTIONS]     Create an evidence-supported learning record
   search [-d|--directory PATH] QUERY
@@ -618,6 +651,8 @@ RECORD IDS
 EXAMPLES
   tincan init .
   tincan plan
+  tincan remember "Explore a shorter review default"
+  tincan later
   tincan review
   tincan review --quarter 2025-Q3
   tincan review --year 2025 --all-projects
@@ -809,6 +844,30 @@ mod tests {
         assert!(journal.planned.is_empty());
         assert_eq!(journal.questions, vec!["Should topics be normalized?"]);
         assert_eq!(journal.next, vec!["Test on another repository"]);
+    }
+
+    #[test]
+    fn parses_later_shelf_commands() {
+        assert_eq!(
+            parse(
+                ["remember", "Explore a shorter review default"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::Remember {
+                repo: std::env::current_dir().unwrap(),
+                text: "Explore a shorter review default".to_string(),
+            }
+        );
+        assert_eq!(
+            parse(["later", "-d", "workspace"].map(str::to_string).to_vec()).unwrap(),
+            Command::Later {
+                repo: PathBuf::from("workspace"),
+            }
+        );
+        assert!(parse(vec!["remember".to_string()]).is_err());
+        assert!(parse(["later", "extra"].map(str::to_string).to_vec()).is_err());
     }
 
     #[test]

@@ -59,6 +59,65 @@ fn invalid_input_fails_and_writes_the_error_to_stderr() {
 }
 
 #[test]
+fn keeps_a_small_deduplicated_later_shelf_in_resume_context() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("tincan-cli-later-{unique}"));
+    fs::create_dir_all(&workspace).unwrap();
+    assert!(
+        tincan()
+            .arg("init")
+            .arg(&workspace)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    fs::write(
+        workspace.join(".tincan/later.md"),
+        "# Later\n\nNotes here stay editable.\n\n<!-- none -->\n",
+    )
+    .unwrap();
+
+    for _ in 0..2 {
+        let output = tincan()
+            .current_dir(&workspace)
+            .args(["remember", "Explore a shorter review default"])
+            .output()
+            .unwrap();
+        assert!(output.status.success());
+    }
+    let later = tincan()
+        .current_dir(&workspace)
+        .arg("later")
+        .output()
+        .unwrap();
+    let later_stdout = String::from_utf8(later.stdout).unwrap();
+    assert_eq!(
+        later_stdout
+            .matches("Explore a shorter review default")
+            .count(),
+        1
+    );
+    assert!(later_stdout.contains("Notes here stay editable."));
+
+    let resume = tincan()
+        .current_dir(&workspace)
+        .arg("resume")
+        .output()
+        .unwrap();
+    let resume_stdout = String::from_utf8(resume.stdout).unwrap();
+    assert!(resume_stdout.contains("Later:"));
+    assert!(resume_stdout.contains("Explore a shorter review default"));
+    assert!(resume_stdout.find("Plan:") < resume_stdout.find("Later:"));
+    assert!(resume_stdout.find("Later:") < resume_stdout.find("No journal entries yet."));
+
+    fs::remove_dir_all(workspace).unwrap();
+}
+
+#[test]
 fn review_replaces_summary_and_writes_selected_context_safely() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

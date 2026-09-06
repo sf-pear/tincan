@@ -18,10 +18,14 @@ important decisions are missed.
 Tincan keeps a small record of what matters:
 
 - **Plan:** the small, living list of intended outcomes.
+- **Later:** an informal shelf of user-approved ideas and observations to revisit.
 - **Journal:** meaningful progress, open questions, plans, and next steps.
 - **Decision:** an accepted choice that should guide future work.
 - **Learning:** an evidence-supported conclusion worth remembering.
 - **Global learning:** a user-approved learning available across projects.
+
+`resume` shows the plan, the later shelf, and the latest journal together. Later
+items are possibilities to consider against the current work, not commitments.
 
 Tincan is designed to be maintained by the coding agent as work happens. With
 the bundled skill installed, the agent records meaningful progress, accepted
@@ -61,6 +65,8 @@ tincan init C:\path\to\workspace
 cd C:\path\to\workspace
 
 tincan resume
+tincan remember "Explore a shorter review default"
+tincan later
 tincan decide "Load full media details on demand" --file web/app/page.tsx
 tincan learn "Paging did not reduce rendering work" --evidence "Release trace"
 tincan journal --done "Implemented the compact gallery read model" `
@@ -91,6 +97,7 @@ Project memory:
 .tincan/
 |-- config.toml
 |-- plan.md
+|-- later.md
 |-- decisions/
 |-- learnings/
 `-- journal/

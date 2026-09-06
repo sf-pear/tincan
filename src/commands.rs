@@ -32,6 +32,8 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Plan { repo } => plan(repo),
+        Command::Remember { repo, text } => remember(repo, &text),
+        Command::Later { repo } => later(repo),
         Command::Resume { repo } => resume(repo),
         Command::Search { repo, query } => search(repo, &query),
         Command::Show { repo, id } => show(repo, &id),
@@ -651,6 +653,9 @@ fn journal(args: JournalArgs) -> Result<(), String> {
 fn resume(path: std::path::PathBuf) -> Result<(), String> {
     let root = find_workspace(&path)?;
     print_plan(&root)?;
+    let (later_path, later_content, _) = store::read_later(&root)?;
+    println!("\nLater: {}\n", display_path(&later_path));
+    print!("{later_content}");
     let Some((journal_path, content)) = store::latest_journal(&root)? else {
         println!();
         println!("No journal entries yet.");
@@ -665,6 +670,26 @@ fn resume(path: std::path::PathBuf) -> Result<(), String> {
 fn plan(path: std::path::PathBuf) -> Result<(), String> {
     let root = find_workspace(&path)?;
     print_plan(&root)
+}
+
+fn remember(path: std::path::PathBuf, text: &str) -> Result<(), String> {
+    let root = find_workspace(&path)?;
+    let update = store::remember(&root, text)?;
+    println!("Later: {}", display_path(&update.path));
+    if update.added {
+        println!("Added 1 item.");
+    } else {
+        println!("No new item; an exact duplicate was already present.");
+    }
+    Ok(())
+}
+
+fn later(path: std::path::PathBuf) -> Result<(), String> {
+    let root = find_workspace(&path)?;
+    let (later_path, content, _) = store::read_later(&root)?;
+    println!("Later: {}\n", display_path(&later_path));
+    print!("{content}");
+    Ok(())
 }
 
 fn print_plan(root: &std::path::Path) -> Result<(), String> {

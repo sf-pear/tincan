@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 const DIRECTORIES: [&str; 3] = ["decisions", "learnings", "journal"];
 const CONFIG: &str = "# Tincan workspace configuration\nversion = 2\nstorage = \"markdown\"\n";
-const PLAN: &str = "# Plan\n\n## Planned\n\n<!-- none -->\n\n## Ideas\n\n<!-- none -->\n";
+const PLAN: &str = "# Plan\n\n## Planned\n\n<!-- none -->\n";
+const LATER: &str = "# Later\n\n<!-- none -->\n";
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Scope {
@@ -78,6 +79,11 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
     if !plan.exists() {
         fs::write(&plan, PLAN)
             .map_err(|error| format!("cannot write {}: {error}", plan.display()))?;
+    }
+    let later = root.join("later.md");
+    if !later.exists() {
+        fs::write(&later, LATER)
+            .map_err(|error| format!("cannot write {}: {error}", later.display()))?;
     }
     Ok(root)
 }
@@ -530,6 +536,11 @@ pub fn require(repo: &Path) -> Result<PathBuf, String> {
         fs::write(&plan, PLAN)
             .map_err(|error| format!("cannot write {}: {error}", plan.display()))?;
     }
+    let later = root.join("later.md");
+    if !later.exists() {
+        fs::write(&later, LATER)
+            .map_err(|error| format!("cannot write {}: {error}", later.display()))?;
+    }
     Ok(root)
 }
 
@@ -538,6 +549,57 @@ pub fn read_plan(repo: &Path) -> Result<(PathBuf, String), String> {
     let content = fs::read_to_string(&path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     Ok((path, content))
+}
+
+pub struct RememberUpdate {
+    pub path: PathBuf,
+    pub added: bool,
+}
+
+pub fn read_later(repo: &Path) -> Result<(PathBuf, String, usize), String> {
+    let path = require(repo)?.join("later.md");
+    let content = match fs::read_to_string(&path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => LATER.to_string(),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    let count = content
+        .lines()
+        .filter(|line| line.starts_with("- "))
+        .count();
+    Ok((path, content, count))
+}
+
+pub fn remember(repo: &Path, text: &str) -> Result<RememberUpdate, String> {
+    let root = require(repo)?;
+    let path = root.join("later.md");
+    let item = text.trim();
+    if item.is_empty() {
+        return Err("remember requires a non-empty item".to_string());
+    }
+    if item.contains(['\n', '\r']) {
+        return Err("remember items must fit on one line".to_string());
+    }
+    let (_, existing, _) = read_later(repo)?;
+    if existing
+        .lines()
+        .filter_map(|line| line.strip_prefix("- "))
+        .any(|value| value.trim() == item)
+    {
+        return Ok(RememberUpdate { path, added: false });
+    }
+    let mut content = existing
+        .lines()
+        .filter(|line| line.trim() != "<!-- none -->")
+        .collect::<Vec<_>>()
+        .join("\n");
+    content.truncate(content.trim_end().len());
+    content.push_str("\n\n- ");
+    content.push_str(item);
+    content.push('\n');
+    fs::write(&path, content)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    Ok(RememberUpdate { path, added: true })
 }
 
 fn validate_config(path: &Path) -> Result<(), String> {
@@ -1283,6 +1345,7 @@ mod tests {
         );
         assert!(!root.join("AGENT_GUIDE.md").exists());
         assert_eq!(fs::read_to_string(root.join("plan.md")).unwrap(), PLAN);
+        assert_eq!(fs::read_to_string(root.join("later.md")).unwrap(), LATER);
         for directory in DIRECTORIES {
             assert!(root.join(directory).is_dir());
         }

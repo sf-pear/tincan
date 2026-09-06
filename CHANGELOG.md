@@ -4,6 +4,21 @@ All notable changes to Tincan will be documented in this file.
 
 The format follows Keep a Changelog and versions follow Semantic Versioning.
 
+## [0.6.1] - 2026-09-06
+
+### Added
+
+- Add a lightweight `.tincan/later.md` shelf with `remember` and `later`
+  commands for tentative ideas and observations that do not belong in the plan.
+
+### Changed
+
+- Make `resume` show the later shelf beside the plan and latest journal while
+  keeping clear that later items are possibilities rather than current direction.
+- Teach the bundled skill to maintain important context during ordinary work,
+  request confirmation before preserving inferred ideas, and use existing
+  learning topics as lightweight applicability hints.
+
 ## [0.6.0] - 2026-09-03
 
 ### Added

@@ -6,7 +6,8 @@ repositories.
 
 ## Memory
 
-- **Plan:** a small living guide to current outcome-level direction and ideas.
+- **Plan:** a small living guide to current outcome-level direction.
+- **Later:** an informal shelf of user-approved ideas and observations to revisit.
 - **Journal:** a dated handoff with enough context to resume useful work.
 - **Decision:** an accepted choice that constrains future work.
 - **Learning:** a durable conclusion supported by evidence.
@@ -46,8 +47,10 @@ shows the complete Tincan skill path, and omits installations already current.
 | --- | --- |
 | `init [PATH]` | Create private `.tincan/` storage. |
 | `plan` | Print the living `.tincan/plan.md`; edit that file directly. |
+| `remember TEXT` | Add one informal idea or observation to revisit later. |
+| `later` | Print the informal `.tincan/later.md` shelf. |
 | `journal` | Add concise context to today's project handoff. |
-| `resume` | Print the living plan and latest journal when starting or wrapping up. |
+| `resume` | Print the plan, later shelf, and latest journal together. |
 | `decide STATEMENT` | Record an accepted choice. |
 | `learn STATEMENT` | Record an evidence-supported reusable conclusion. |
 | `search QUERY` | Search project records and global learnings. |
@@ -82,7 +85,18 @@ Before handing meaningful work back, review whether the next person has enough
 context and update only what materially changed. Record accepted choices with
 `decide` and durable evidence-backed conclusions with `learn`; do not duplicate
 them in the journal. Review the plan at the same boundary, but change it only
-when an outcome or idea was completed, invalidated, refined, or revealed.
+when an outcome was completed, invalidated, refined, or revealed.
+
+## Later
+
+Use `tincan remember "..."` when an idea, observation, or minor issue is worth
+revisiting but is not yet an intended outcome, accepted decision, or supported
+learning. `tincan later` prints the shelf. Edit `.tincan/later.md` directly to
+remove discarded items or move promoted items into the plan or a durable record.
+Later items deliberately have no priority, status, assignment, or audit trail.
+`resume` includes them so an agent can notice connections to the current work,
+but an item is not current direction and must not be acted on merely because it
+appears there.
 
 Run `tincan --help` for complete syntax.
 
