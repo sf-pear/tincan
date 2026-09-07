@@ -118,6 +118,45 @@ fn keeps_a_small_deduplicated_later_shelf_in_resume_context() {
 }
 
 #[test]
+fn resume_does_not_require_access_to_the_personal_project_registry() {
+    let unique = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_nanos();
+    let workspace = std::env::temp_dir().join(format!("tincan-cli-local-resume-{unique}"));
+    let tincan_home = std::env::temp_dir().join(format!("tincan-cli-blocked-home-{unique}"));
+    fs::create_dir_all(&workspace).unwrap();
+    assert!(
+        tincan()
+            .arg("init")
+            .arg(&workspace)
+            .output()
+            .unwrap()
+            .status
+            .success()
+    );
+    fs::write(&tincan_home, "not a directory").unwrap();
+
+    let resume = tincan()
+        .env("TINCAN_HOME", &tincan_home)
+        .current_dir(&workspace)
+        .arg("resume")
+        .output()
+        .unwrap();
+
+    assert!(
+        resume.status.success(),
+        "resume failed: {}",
+        String::from_utf8_lossy(&resume.stderr)
+    );
+    assert!(String::from_utf8(resume.stdout).unwrap().contains("Plan:"));
+    assert!(resume.stderr.is_empty());
+
+    fs::remove_dir_all(workspace).unwrap();
+    fs::remove_file(tincan_home).unwrap();
+}
+
+#[test]
 fn review_replaces_summary_and_writes_selected_context_safely() {
     let unique = SystemTime::now()
         .duration_since(UNIX_EPOCH)

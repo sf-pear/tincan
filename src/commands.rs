@@ -256,7 +256,16 @@ fn sort_registered_workspaces(workspaces: &mut [store::RegisteredWorkspace]) {
 
 fn find_workspace(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
     let root = workspace::find(path)?;
-    store::reconcile_workspace(&root)?;
+    // The personal registry is only a discovery index for cross-project work.
+    // Local commands must remain usable when that user-level location is not
+    // writable, such as inside an agent sandbox. A duplicate live workspace ID
+    // is different: continuing could silently conflate a copied workspace with
+    // the original, so preserve that safety error.
+    if let Err(error) = store::reconcile_workspace(&root)
+        && error.starts_with("workspace ID ")
+    {
+        return Err(error);
+    }
     Ok(root)
 }
 

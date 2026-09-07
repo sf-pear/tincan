@@ -4,6 +4,14 @@ All notable changes to Tincan will be documented in this file.
 
 The format follows Keep a Changelog and versions follow Semantic Versioning.
 
+## [0.6.2] - 2026-09-07
+
+### Fixed
+
+- Keep project-local commands available when the optional user-level project
+  registry cannot be written, while still rejecting duplicate live workspace
+  IDs.
+
 ## [0.6.1] - 2026-09-06
 
 ### Added
