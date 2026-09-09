@@ -13,6 +13,13 @@ pub enum Command {
     ProjectsUnregister {
         target: Option<String>,
     },
+    GitInclude {
+        repo: PathBuf,
+        yes: bool,
+    },
+    GitExclude {
+        repo: PathBuf,
+    },
     Record(RecordArgs),
     Journal(JournalArgs),
     Plan {
@@ -108,6 +115,7 @@ pub fn parse(args: Vec<String>) -> Result<Command, String> {
         ),
         "review" => parse_review(&args[1..]),
         "projects" => parse_projects(&args[1..]),
+        "git" => parse_git(&args[1..]),
         "decide" => parse_record("decision", &args[1..]),
         "learn" => parse_record("learning", &args[1..]),
         "journal" => parse_journal(&args[1..]),
@@ -217,6 +225,40 @@ fn parse_projects(args: &[String]) -> Result<Command, String> {
             Err("projects unregister requires PATH or WORKSPACE_ID".to_string())
         }
         _ => Err("projects accepts no arguments or `unregister PATH|WORKSPACE_ID`".to_string()),
+    }
+}
+
+fn parse_git(args: &[String]) -> Result<Command, String> {
+    let Some(action) = args.first().map(String::as_str) else {
+        return Err(
+            "git requires an action; use `tincan git include` or `tincan git exclude`".to_string(),
+        );
+    };
+    if !matches!(action, "include" | "exclude") {
+        return Err(format!(
+            "unknown git action: {action}; use `tincan git include` or `tincan git exclude`"
+        ));
+    }
+    let values = Flags::parse(&args[1..])?;
+    let allowed = if action == "include" {
+        &["directory", "yes"][..]
+    } else {
+        &["directory"][..]
+    };
+    values.ensure_only(allowed)?;
+    values.ensure_at_most_one(allowed)?;
+    if !values.positionals.is_empty() {
+        return Err(format!("git {action} does not accept positional arguments"));
+    }
+    if action == "include" {
+        Ok(Command::GitInclude {
+            repo: values.directory()?,
+            yes: values.present("yes"),
+        })
+    } else {
+        Ok(Command::GitExclude {
+            repo: values.directory()?,
+        })
     }
 }
 
@@ -494,7 +536,7 @@ impl Flags {
                 }
                 if matches!(
                     name,
-                    "changed" | "force" | "verbose" | "all-time" | "all-projects"
+                    "changed" | "force" | "verbose" | "all-time" | "all-projects" | "yes"
                 ) {
                     parsed.values.push((name.to_string(), None));
                     index += 1;
@@ -610,6 +652,8 @@ COMMANDS
   review [OPTIONS]              Inspect history or select retrospective context
   projects                      List registered workspaces and their status
   projects unregister TARGET    Forget one registration without changing projects
+  git include [OPTIONS]          Make .tincan visible to Git without tracking it
+  git exclude [OPTIONS]          Exclude .tincan from Git locally
   plan [-d|--directory PATH]    Print the living project plan
   remember [-d|--directory PATH] TEXT
                                 Keep one informal item for later
@@ -657,6 +701,8 @@ EXAMPLES
   tincan review --quarter 2025-Q3
   tincan review --year 2025 --all-projects
   tincan projects
+  tincan git include
+  tincan git exclude
   tincan review --all-time --output review.md
   tincan journal --done "Implemented deterministic path matching"
   tincan decide "Keep Markdown canonical" --topic storage
@@ -690,6 +736,20 @@ PROJECTS
 
   List registrations and whether each path is available. Unregister one by path
   or ID. Project .tincan directories are untouched.
+
+GIT INCLUDE
+  tincan git include [-d|--directory PATH] [--yes]
+
+  Remove only Tincan's exact rule from the repository's local Git exclude file.
+  This makes .tincan visible to Git but does not add or commit any files. The
+  command asks for confirmation unless --yes is provided. Other ignore rules
+  may still keep .tincan hidden.
+
+GIT EXCLUDE
+  tincan git exclude [-d|--directory PATH]
+
+  Add Tincan's exact rule to the repository's local Git exclude file. This
+  restores the private default without changing any tracked files.
 
 SKILL INSTALL
   tincan skill install [--path SKILLS_DIRECTORY] [--force]
@@ -945,6 +1005,29 @@ mod tests {
             parse(["projects", "unregister"].map(str::to_string).to_vec())
                 .unwrap_err()
                 .contains("requires PATH or WORKSPACE_ID")
+        );
+    }
+
+    #[test]
+    fn parses_git_include_with_explicit_confirmation() {
+        assert!(matches!(
+            parse(
+                ["git", "include", "--directory", "project", "--yes"]
+                    .map(str::to_string)
+                    .to_vec()
+            )
+            .unwrap(),
+            Command::GitInclude { repo, yes: true }
+                if repo == std::path::Path::new("project")
+        ));
+        assert!(matches!(
+            parse(["git", "exclude"].map(str::to_string).to_vec()).unwrap(),
+            Command::GitExclude { .. }
+        ));
+        assert!(
+            parse(["git", "remove"].map(str::to_string).to_vec())
+                .unwrap_err()
+                .contains("use `tincan git include`")
         );
     }
 

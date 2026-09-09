@@ -3,6 +3,11 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+pub struct IncludeOutcome {
+    pub removed_local_rule: bool,
+    pub still_ignored: bool,
+}
+
 pub fn repository_root(path: &Path) -> Result<Option<PathBuf>, String> {
     let output = Command::new("git")
         .args(["rev-parse", "--show-toplevel"])
@@ -79,6 +84,36 @@ pub fn protect_workspace(workspace: &Path) -> Result<Option<bool>, String> {
     let changed = crate::store::ensure_git_excluded(&exclude, &pattern)?;
     verify_ignored(&repo, &format!("{tincan}/config.toml"))?;
     Ok(Some(changed))
+}
+
+pub fn include_workspace(workspace: &Path) -> Result<Option<IncludeOutcome>, String> {
+    let workspace = workspace
+        .canonicalize()
+        .map_err(|error| format!("cannot access workspace {}: {error}", workspace.display()))?;
+    let Some(repo) = repository_root(&workspace)? else {
+        return Ok(None);
+    };
+    let relative = workspace.strip_prefix(&repo).map_err(|_| {
+        format!(
+            "{} is outside Git repository {}",
+            workspace.display(),
+            repo.display()
+        )
+    })?;
+    let prefix = slash(relative);
+    let tincan = if prefix.is_empty() {
+        ".tincan".to_string()
+    } else {
+        format!("{prefix}/.tincan")
+    };
+    let exclude = exclude_path(&repo)?;
+    let pattern = format!("/{tincan}/");
+    let removed_local_rule = crate::store::remove_git_excluded(&exclude, &pattern)?;
+    let still_ignored = is_ignored(&repo, &format!("{tincan}/config.toml"))?;
+    Ok(Some(IncludeOutcome {
+        removed_local_rule,
+        still_ignored,
+    }))
 }
 
 pub fn workspace_changed_files(workspace: &Path) -> Result<Option<Vec<String>>, String> {
@@ -201,6 +236,22 @@ fn verify_ignored(repo: &Path, path: &str) -> Result<(), String> {
     ))
 }
 
+fn is_ignored(repo: &Path, path: &str) -> Result<bool, String> {
+    let output = Command::new("git")
+        .args(["check-ignore", "--quiet", "--no-index", "--", path])
+        .current_dir(repo)
+        .output()
+        .map_err(|error| format!("cannot run git: {error}"))?;
+    match output.status.code() {
+        Some(0) => Ok(true),
+        Some(1) => Ok(false),
+        _ => Err(format!(
+            "git check-ignore failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        )),
+    }
+}
+
 fn slash(path: &Path) -> String {
     path.to_string_lossy()
         .replace('\\', "/")
@@ -270,6 +321,29 @@ mod tests {
             status.is_empty(),
             "private memory appeared in status: {status}"
         );
+        fs::remove_dir_all(repo).unwrap();
+    }
+
+    #[test]
+    fn includes_only_the_workspace_tincan_directory() {
+        let repo = temp("nested-visible");
+        let workspace = repo.join("projects");
+        fs::create_dir_all(&workspace).unwrap();
+        run(&repo, &["init", "--quiet"]).unwrap();
+        assert_eq!(protect_workspace(&workspace).unwrap(), Some(true));
+        crate::store::initialize(&workspace).unwrap();
+
+        let outcome = include_workspace(&workspace).unwrap().unwrap();
+
+        assert!(outcome.removed_local_rule);
+        assert!(!outcome.still_ignored);
+        let status = run(&repo, &["status", "--short", "--untracked-files=all"]).unwrap();
+        assert!(status.contains("projects/.tincan/config.toml"));
+        assert!(!status.contains("projects/.tincan/../"));
+
+        assert_eq!(protect_workspace(&workspace).unwrap(), Some(true));
+        let status = run(&repo, &["status", "--short", "--untracked-files=all"]).unwrap();
+        assert!(status.is_empty());
         fs::remove_dir_all(repo).unwrap();
     }
 

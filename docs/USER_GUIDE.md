@@ -36,6 +36,10 @@ tincan init C:\path\to\workspace
 `init` creates `.tincan/`. When the workspace is inside a Git repository,
 Tincan verifies that the folder is untracked and adds it to that repository's
 local exclude file. A non-Git parent needs no ignore rule for its child repos.
+Run `tincan git include` to remove only Tincan's local exclude rule and make
+`.tincan` visible to Git without adding or committing any files. The command
+asks for confirmation and warns if another Git rule still ignores the folder.
+Run `tincan git exclude` to restore Tincan's private local exclusion.
 After updating the CLI, run `tincan skill status` to check every detected
 installation and `tincan skill install` when an update is available.
 The interactive installer labels each destination as an install or update,
@@ -60,6 +64,8 @@ shows the complete Tincan skill path, and omits installations already current.
 | `review TIME_OPTION` | Print or save deterministic context for a retrospective. |
 | `projects` | List registered workspaces and whether their paths are available. |
 | `projects unregister PATH|UUID` | Forget one registration without changing project files. |
+| `git include` | Make `.tincan` visible to Git without adding or committing it. |
+| `git exclude` | Restore Tincan's private local Git exclusion. |
 | `changes` | Match changed files across nested Git repos to records linked by `--file`. |
 | `skill install` | Install the agent workflow into selected harnesses. |
 | `skill status` | Check whether detected Agent Skill installations are current. |
@@ -120,19 +126,18 @@ tincan review --year 2025 --all-projects
 
 Time options are mutually exclusive and explicit. The current project is the
 default; `--all-projects` reads records directly from every registered
-workspace. `init` registers a stable workspace ID, and running any project
-command after moving a workspace reconnects its path when the old location is
-unavailable. If both locations still exist with the same ID, Tincan reports a
-copy conflict instead of guessing; run `tincan init PATH` on the copy to assign
-it a new ID. Unavailable or unreadable projects are skipped and reported.
+workspace. `init` registers a stable workspace ID. After moving a workspace,
+run `tincan init PATH` at its new location to update the registration. If both
+locations still exist with the same ID, `init` treats the new location as a copy
+and assigns it a new ID. Unavailable or unreadable projects are skipped and reported.
 Output prints to the terminal by default. `--output FILE` creates a Markdown file and
 refuses to replace an existing file unless `--force` is also provided.
 
 Use `tincan projects` to inspect the registry, then run `tincan projects
 unregister PATH_OR_ID` to remove one entry. Unregistering never changes the
-project's `.tincan/` directory. Later commands update the path of a registered
-project but do not re-register one that was explicitly unregistered; rerun
-`init` to register it. The registry contains stable IDs and absolute project
+project's `.tincan/` directory. Ordinary project commands never change the
+registry; rerun `init` to register an existing, moved, or unregistered project.
+The registry contains stable IDs and absolute project
 paths under `~/.tincan/projects/`, or `TINCAN_HOME/projects/` when configured;
 it never contains copies of project records.
 

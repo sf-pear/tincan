@@ -40,6 +40,24 @@ Keep the kinds of memory distinct:
    only relevant full records with `show`, and do not repeat searches already
    performed for the same task.
 
+## Handle personal storage permissions
+
+Ordinary project reads do not update the personal project registry. Register a
+new or existing workspace only with an explicit, user-approved `tincan init
+PATH`. When a known workspace has moved, ask before running `tincan init PATH`
+at its new location; this is the intentional way to update its registration.
+
+`init`, `lift`, and registry-management commands write outside the project to
+the user's personal Tincan directory. `tincan git include` and `tincan git
+exclude` change the Git repository's local exclude file; include may expose
+private project memory, so run it only when the user explicitly requests that
+change. If one of these
+already-approved commands is denied by the harness sandbox, retry the same
+command through the harness's standard permission-escalation mechanism. Do not
+treat the initial sandbox denial as proof that Tincan is unavailable. If
+permission is declined or the harness cannot request it, explain which
+user-level or Git metadata write was not completed.
+
 ## Review history
 
 When the user asks for a project retrospective or a review of work over time,

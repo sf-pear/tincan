@@ -4,6 +4,26 @@ All notable changes to Tincan will be documented in this file.
 
 The format follows Keep a Changelog and versions follow Semantic Versioning.
 
+## [0.6.3] - 2026-09-09
+
+### Added
+
+- Add `tincan git include` with explicit confirmation to make project memory
+  visible without tracking it, plus `tincan git exclude` to restore Tincan's
+  private local Git exclusion.
+
+### Changed
+
+- Update the project registry only through explicit `init` and `projects`
+  commands; ordinary project commands no longer reconcile registrations as a
+  side effect.
+- Keep searches and cross-project reviews read-only instead of creating missing
+  optional workspace files and directories while scanning.
+- Make `init` distinguish new and existing Tincan workspaces and report whether
+  their project registration was added, already current, moved, or copied.
+- Teach the bundled skill to retry approved personal-storage writes through the
+  harness permission flow and to use explicit `init` for moved workspaces.
+
 ## [0.6.2] - 2026-09-07
 
 ### Fixed

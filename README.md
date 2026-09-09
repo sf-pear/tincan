@@ -88,6 +88,8 @@ copying them centrally. Run `tincan projects` to inspect registered paths and
 `tincan projects unregister PATH_OR_ID` to forget one registration without
 changing any project's `.tincan/` directory. The registry stores only stable
 IDs and absolute paths under `~/.tincan/projects/` (or `TINCAN_HOME/projects/`).
+Ordinary commands never update it; rerun `tincan init PATH` to register an
+existing, moved, or previously unregistered workspace.
 
 ## Storage
 
@@ -113,6 +115,9 @@ User-approved global learnings:
 
 When the workspace is inside Git, Tincan excludes `.tincan/` through Git's
 local exclude file. A non-Git parent is already outside its nested repositories.
+Run `tincan git include` to remove only Tincan's local exclude rule and make
+`.tincan` visible to Git without adding or committing any files. Run `tincan
+git exclude` to restore the private local exclusion.
 Markdown is canonical, and people or agents can edit record bodies and the plan
 directly. After an agent shows a generalized Markdown draft and receives
 approval, `tincan lift UUID --from FILE` writes it into

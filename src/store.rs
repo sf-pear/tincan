@@ -49,6 +49,14 @@ pub struct RegisteredWorkspace {
     pub path: PathBuf,
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub enum RegistrationOutcome {
+    Registered { id: String },
+    AlreadyCurrent { id: String },
+    Moved { id: String, previous: PathBuf },
+    Copied { id: String },
+}
+
 #[derive(Debug)]
 struct RegistryLock {
     path: PathBuf,
@@ -88,7 +96,7 @@ pub fn initialize(repo: &Path) -> Result<PathBuf, String> {
     Ok(root)
 }
 
-pub fn register_workspace(repo: &Path) -> Result<String, String> {
+pub fn register_workspace(repo: &Path) -> Result<RegistrationOutcome, String> {
     let config = repo.join(".tincan/config.toml");
     validate_config(&config)?;
     let directory = personal_tincan_root()?.join("projects");
@@ -97,39 +105,24 @@ pub fn register_workspace(repo: &Path) -> Result<String, String> {
     let _lock = lock_registry(&directory)?;
     let (mut id, _) = ensure_workspace_id(&config)?;
     let existing_entry = directory.join(format!("{id}.path"));
-    if let Some(previous) = read_workspace_entry(&existing_entry)? {
-        if previous != repo && workspace_at_path_has_id(&previous, &id) {
-            id = replace_workspace_id(&config)?;
+    let previous = read_workspace_entry(&existing_entry)?;
+    let outcome = match previous {
+        Some(previous) if previous == repo => {
+            RegistrationOutcome::AlreadyCurrent { id: id.clone() }
         }
-    }
+        Some(previous) if workspace_at_path_has_id(&previous, &id) => {
+            id = replace_workspace_id(&config)?;
+            RegistrationOutcome::Copied { id: id.clone() }
+        }
+        Some(previous) => RegistrationOutcome::Moved {
+            id: id.clone(),
+            previous,
+        },
+        None => RegistrationOutcome::Registered { id: id.clone() },
+    };
     write_workspace_entry(&directory, &id, repo)?;
     remove_other_registrations_for_path(&directory, &id, repo)?;
-    Ok(id)
-}
-
-pub fn reconcile_workspace(repo: &Path) -> Result<String, String> {
-    let config = repo.join(".tincan/config.toml");
-    validate_config(&config)?;
-    let directory = personal_tincan_root()?.join("projects");
-    fs::create_dir_all(&directory)
-        .map_err(|error| format!("cannot create {}: {error}", directory.display()))?;
-    let _lock = lock_registry(&directory)?;
-    let (id, created) = ensure_workspace_id(&config)?;
-    let entry = directory.join(format!("{id}.path"));
-    if created || entry.is_file() {
-        if let Some(previous) = read_workspace_entry(&entry)? {
-            if previous != repo && workspace_at_path_has_id(&previous, &id) {
-                return Err(format!(
-                    "workspace ID {id} is already active at {}; the workspace appears to have been copied rather than moved; run `tincan init {}` to assign this copy a new ID",
-                    previous.display(),
-                    repo.display()
-                ));
-            }
-        }
-        write_workspace_entry(&directory, &id, repo)?;
-        remove_other_registrations_for_path(&directory, &id, repo)?;
-    }
-    Ok(id)
+    Ok(outcome)
 }
 
 fn write_workspace_entry(directory: &Path, id: &str, repo: &Path) -> Result<(), String> {
@@ -516,17 +509,30 @@ pub fn ensure_git_excluded(path: &Path, pattern: &str) -> Result<bool, String> {
     Ok(true)
 }
 
-pub fn require(repo: &Path) -> Result<PathBuf, String> {
-    let root = repo.join(".tincan");
-    let config = root.join("config.toml");
-    if !config.is_file() {
-        return Err(format!(
-            "{} is not initialized; run `tincan init {}`",
-            repo.display(),
-            repo.display()
-        ));
+pub fn remove_git_excluded(path: &Path, pattern: &str) -> Result<bool, String> {
+    let existing = match fs::read_to_string(path) {
+        Ok(content) => content,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+        Err(error) => return Err(format!("cannot read {}: {error}", path.display())),
+    };
+    if !existing.lines().any(|line| line.trim() == pattern) {
+        return Ok(false);
     }
-    validate_config(&config)?;
+    let mut updated = existing
+        .lines()
+        .filter(|line| line.trim() != pattern)
+        .collect::<Vec<_>>()
+        .join("\n");
+    if !updated.is_empty() {
+        updated.push('\n');
+    }
+    fs::write(path, updated)
+        .map_err(|error| format!("cannot write {}: {error}", path.display()))?;
+    Ok(true)
+}
+
+pub fn require(repo: &Path) -> Result<PathBuf, String> {
+    let root = open(repo)?;
     for directory in DIRECTORIES {
         fs::create_dir_all(root.join(directory))
             .map_err(|error| format!("cannot create .tincan/{directory}: {error}"))?;
@@ -544,8 +550,22 @@ pub fn require(repo: &Path) -> Result<PathBuf, String> {
     Ok(root)
 }
 
+fn open(repo: &Path) -> Result<PathBuf, String> {
+    let root = repo.join(".tincan");
+    let config = root.join("config.toml");
+    if !config.is_file() {
+        return Err(format!(
+            "{} is not initialized; run `tincan init {}`",
+            repo.display(),
+            repo.display()
+        ));
+    }
+    validate_config(&config)?;
+    Ok(root)
+}
+
 pub fn read_plan(repo: &Path) -> Result<(PathBuf, String), String> {
-    let path = require(repo)?.join("plan.md");
+    let path = open(repo)?.join("plan.md");
     let content = fs::read_to_string(&path)
         .map_err(|error| format!("cannot read {}: {error}", path.display()))?;
     Ok((path, content))
@@ -557,7 +577,7 @@ pub struct RememberUpdate {
 }
 
 pub fn read_later(repo: &Path) -> Result<(PathBuf, String, usize), String> {
-    let path = require(repo)?.join("later.md");
+    let path = open(repo)?.join("later.md");
     let content = match fs::read_to_string(&path) {
         Ok(content) => content,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => LATER.to_string(),
@@ -718,10 +738,14 @@ pub fn update_journal(
 }
 
 pub fn latest_journal(repo: &Path) -> Result<Option<(PathBuf, String)>, String> {
-    let root = require(repo)?;
+    let root = open(repo)?;
     let directory = root.join("journal");
-    let mut paths = fs::read_dir(&directory)
-        .map_err(|error| format!("cannot read {}: {error}", directory.display()))?
+    let entries = match fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("cannot read {}: {error}", directory.display())),
+    };
+    let mut paths = entries
         .filter_map(Result::ok)
         .map(|entry| entry.path())
         .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("md"))
@@ -797,10 +821,13 @@ fn render_journal(date: &str, created_at: &str, sections: JournalRender<'_>) -> 
 }
 
 pub fn scan(repo: &Path) -> Result<Vec<Document>, String> {
-    let root = require(repo)?;
+    let root = open(repo)?;
     let mut documents = Vec::new();
     for directory in DIRECTORIES {
-        collect_documents(&root.join(directory), Scope::Project, &mut documents)?;
+        let directory = root.join(directory);
+        if directory.is_dir() {
+            collect_documents(&directory, Scope::Project, &mut documents)?;
+        }
     }
     documents.sort_by(|left, right| left.path.cmp(&right.path));
     Ok(documents)
@@ -1320,10 +1347,14 @@ mod tests {
         assert!(ensure_git_excluded(&path, "/.tincan/").unwrap());
         assert!(!ensure_git_excluded(&path, "/.tincan/").unwrap());
 
-        let content = fs::read_to_string(path).unwrap();
+        let content = fs::read_to_string(&path).unwrap();
         assert!(content.starts_with("target/\n"));
         assert!(content.contains("/.tincan/\n"));
         assert_eq!(content.matches(".tincan/").count(), 1);
+
+        assert!(remove_git_excluded(&path, "/.tincan/").unwrap());
+        assert!(!remove_git_excluded(&path, "/.tincan/").unwrap());
+        assert_eq!(fs::read_to_string(&path).unwrap(), "target/\n");
         fs::remove_dir_all(repo).unwrap();
     }
 

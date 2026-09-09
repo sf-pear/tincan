@@ -26,6 +26,10 @@ fn path_style() -> Style {
     Style::new().dim()
 }
 
+fn command_style() -> Style {
+    Style::new().cyan().bold()
+}
+
 fn terminal_text(text: &str, style: Style) -> String {
     if io::stdout().is_terminal() {
         style.apply_to(text).to_string()
@@ -44,6 +48,10 @@ pub fn heading(text: &str) -> String {
 
 pub fn path(text: &str) -> String {
     terminal_text(text, path_style())
+}
+
+pub fn command(text: &str) -> String {
+    terminal_text(text, command_style())
 }
 
 pub fn print() {

@@ -8,7 +8,7 @@ use crate::util::display_path;
 use crate::workspace;
 use chrono::{Datelike, Duration, Local, NaiveDate, SecondsFormat};
 use std::collections::BTreeMap;
-use std::io::Write;
+use std::io::{self, IsTerminal, Write};
 use uuid::Uuid;
 
 pub fn run(command: Result<Command, String>) -> Result<(), String> {
@@ -29,6 +29,8 @@ pub fn run(command: Result<Command, String>) -> Result<(), String> {
         Command::Review(args) => review(args),
         Command::ProjectsList => projects_list(),
         Command::ProjectsUnregister { target } => projects_unregister(target.as_deref()),
+        Command::GitInclude { repo, yes } => git_include(&repo, yes),
+        Command::GitExclude { repo } => git_exclude(&repo),
         Command::Record(args) => record(args),
         Command::Journal(args) => journal(args),
         Command::Plan { repo } => plan(repo),
@@ -157,16 +159,97 @@ fn overwrite_existing_skill(path: Option<&std::path::Path>, force: bool) -> bool
     path.is_none() || force
 }
 
+fn git_include(path: &std::path::Path, yes: bool) -> Result<(), String> {
+    let root = find_workspace(path)?;
+    if !yes {
+        if !io::stdin().is_terminal() {
+            return Err(
+                "git include requires confirmation; rerun with --yes to make .tincan visible to Git"
+                    .to_string(),
+            );
+        }
+        let confirmed = dialoguer::Confirm::new()
+            .with_prompt(
+                "Make .tincan visible to Git? This removes Tincan's local exclude rule but does not add or commit files",
+            )
+            .default(false)
+            .interact()
+            .map_err(|error| format!("cannot read confirmation: {error}"))?;
+        if !confirmed {
+            println!("Kept .tincan excluded from Git locally.");
+            return Ok(());
+        }
+    }
+    let Some(outcome) = git::include_workspace(&root)? else {
+        return Err(format!("{} is not inside a Git repository", root.display()));
+    };
+    if outcome.still_ignored {
+        if outcome.removed_local_rule {
+            println!(
+                "Removed Tincan's local exclude rule, but .tincan is still ignored by another Git rule."
+            );
+        } else {
+            println!(".tincan is still ignored by another Git rule.");
+        }
+    } else if outcome.removed_local_rule {
+        println!(".tincan is visible to Git. No files were added or committed.");
+    } else {
+        println!(".tincan is already visible to Git. No files were added or committed.");
+    }
+    Ok(())
+}
+
+fn git_exclude(path: &std::path::Path) -> Result<(), String> {
+    let root = find_workspace(path)?;
+    match git::protect_workspace(&root)? {
+        Some(_) => println!(".tincan is excluded from Git locally."),
+        None => return Err(format!("{} is not inside a Git repository", root.display())),
+    }
+    Ok(())
+}
+
 fn init(path: std::path::PathBuf) -> Result<(), String> {
     let root = workspace::target(&path)?;
+    let already_initialized = root.join(".tincan/config.toml").is_file();
     let excluded = git::protect_workspace(&root)?;
     let tincan = store::initialize(&root)?;
-    store::register_workspace(&root)?;
+    let registration = store::register_workspace(&root)?;
     branding::print();
-    println!("Initialized Tincan at {}", display_path(&tincan));
+    if already_initialized {
+        println!("Tincan is already initialized at {}", display_path(&tincan));
+    } else {
+        println!("Initialized Tincan at {}", display_path(&tincan));
+    }
+    match registration {
+        store::RegistrationOutcome::Registered { .. } => {
+            println!(
+                "Added this workspace to your Tincan projects. Run {} to see all registered workspaces.",
+                branding::command("tincan projects")
+            );
+        }
+        store::RegistrationOutcome::AlreadyCurrent { .. } => {
+            println!(
+                "This workspace is already in your Tincan projects. Run {} to see all registered workspaces.",
+                branding::command("tincan projects")
+            );
+        }
+        store::RegistrationOutcome::Moved { previous, .. } => {
+            println!(
+                "Updated this workspace in your Tincan projects from {} to this location. Run {} to see all registered workspaces.",
+                display_path(&previous),
+                branding::command("tincan projects")
+            );
+        }
+        store::RegistrationOutcome::Copied { .. } => {
+            println!(
+                "Added this copy as a separate workspace to your Tincan projects. Run {} to see all registered workspaces.",
+                branding::command("tincan projects")
+            );
+        }
+    }
     match excluded {
         Some(true) => println!("Kept .tincan private through Git's local exclude file."),
-        Some(false) => println!(".tincan is already excluded from Git locally."),
+        Some(false) => println!(".tincan is excluded from Git locally."),
         None => {
             println!("This workspace is outside Git; nested repositories cannot track .tincan.")
         }
@@ -176,9 +259,6 @@ fn init(path: std::path::PathBuf) -> Result<(), String> {
 
 fn review(args: ReviewArgs) -> Result<(), String> {
     if args.all_projects {
-        if let Some(root) = workspace::find_optional(&args.repo)? {
-            store::reconcile_workspace(&root)?;
-        }
         return review_all_projects(&args);
     }
     let root = find_workspace(&args.repo)?;
@@ -255,18 +335,7 @@ fn sort_registered_workspaces(workspaces: &mut [store::RegisteredWorkspace]) {
 }
 
 fn find_workspace(path: &std::path::Path) -> Result<std::path::PathBuf, String> {
-    let root = workspace::find(path)?;
-    // The personal registry is only a discovery index for cross-project work.
-    // Local commands must remain usable when that user-level location is not
-    // writable, such as inside an agent sandbox. A duplicate live workspace ID
-    // is different: continuing could silently conflate a copied workspace with
-    // the original, so preserve that safety error.
-    if let Err(error) = store::reconcile_workspace(&root)
-        && error.starts_with("workspace ID ")
-    {
-        return Err(error);
-    }
-    Ok(root)
+    workspace::find(path)
 }
 
 fn review_all_projects(args: &ReviewArgs) -> Result<(), String> {
@@ -341,7 +410,7 @@ fn review_all_projects(args: &ReviewArgs) -> Result<(), String> {
         content.push_str("\n## Unavailable projects\n\n");
         content.push_str(&unavailable.join("\n"));
         content.push_str(
-            "\n\nMoved projects reconnect when Tincan runs from the new location. Use `tincan projects` to inspect registry problems.\n",
+            "\n\nRun `tincan init PATH` to register a moved project at its new location. Use `tincan projects` to inspect registry problems.\n",
         );
     }
     write_review_output(&content, args.output.as_deref(), args.force)
@@ -788,10 +857,7 @@ fn read_lift_body(path: &std::path::Path) -> Result<String, String> {
 
 fn lookup_documents(path: &std::path::Path) -> Result<Vec<store::Document>, String> {
     let mut documents = match workspace::find_optional(path)? {
-        Some(root) => {
-            store::reconcile_workspace(&root)?;
-            store::scan(&root)?
-        }
+        Some(root) => store::scan(&root)?,
         None => Vec::new(),
     };
     documents.extend(store::scan_global()?);
